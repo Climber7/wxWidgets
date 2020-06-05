@@ -367,6 +367,7 @@ bool wxTaskBarIconCustomStatusItemImpl::SetIcon(const wxIcon& icon, const wxStri
     }
     
     NSImage* nsimage = m_icon.GetNSImage();
+    [nsimage setTemplate:(YES)];
     NSSize size = [nsimage size];
     
     // then scale to optimal point resolution
