@@ -10,9 +10,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_DATAVIEWCTRL
 
@@ -77,6 +74,13 @@ static const int PADDING_RIGHTLEFT = 3;
 namespace
 {
 
+// Flags for Walker() function defined below.
+enum WalkFlags
+{
+    Walk_All,               // Visit all items.
+    Walk_ExpandedOnly       // Visit only expanded items.
+};
+
 // The column is either the index of the column to be used for sorting or one
 // of the special values in this enum:
 enum
@@ -105,6 +109,8 @@ public:
     // Default copy ctor, assignment operator and dtor are all OK.
 
     bool IsNone() const { return m_column == SortColumn_None; }
+
+    bool UsesColumn() const { return m_column >= 0; }
 
     int GetColumn() const { return m_column; }
     bool IsAscending() const { return m_ascending; }
@@ -857,7 +863,8 @@ public:
 
     // Some useful functions for row and item mapping
     wxDataViewItem GetItemByRow( unsigned int row ) const;
-    int GetRowByItem( const wxDataViewItem & item ) const;
+    int GetRowByItem( const wxDataViewItem & item,
+                      WalkFlags flags = Walk_All ) const;
 
     wxDataViewTreeNode * GetTreeNodeByRow( unsigned int row ) const;
     // We did not need this temporarily
@@ -869,16 +876,44 @@ public:
     void HitTest( const wxPoint & point, wxDataViewItem & item, wxDataViewColumn* &column );
     wxRect GetItemRect( const wxDataViewItem & item, const wxDataViewColumn* column );
 
-    void Expand( unsigned int row );
+    void Expand( unsigned int row, bool expandChildren = false );
     void Collapse( unsigned int row );
     bool IsExpanded( unsigned int row ) const;
     bool HasChildren( unsigned int row ) const;
 
 #if wxUSE_DRAG_AND_DROP
+    enum DropHint
+    {
+        DropHint_None = 0,
+        DropHint_Inside,
+        DropHint_Below,
+        DropHint_Above
+    };
+    struct DropItemInfo
+    {
+        unsigned int        m_row;
+        DropHint            m_hint;
+
+        wxDataViewItem      m_item;
+        int                 m_proposedDropIndex;
+        int                 m_indentLevel;
+
+        DropItemInfo()
+        :   m_row(static_cast<unsigned int>(-1))
+        ,   m_hint(DropHint_None)
+        ,   m_item(NULL)
+        ,   m_proposedDropIndex(-1)
+        ,   m_indentLevel(-1)
+        {
+        }
+    };
+
     bool EnableDragSource( const wxDataFormat &format );
     bool EnableDropTarget( const wxDataFormat &format );
 
+    void RefreshDropHint();
     void RemoveDropHint();
+    DropItemInfo GetDropItemInfo(const wxCoord x, const wxCoord y);
     wxDragResult OnDragOver( wxDataFormat format, wxCoord x, wxCoord y, wxDragResult def );
     bool OnDrop( wxDataFormat format, wxCoord x, wxCoord y );
     wxDragResult OnData( wxDataFormat format, wxCoord x, wxCoord y, wxDragResult def );
@@ -957,6 +992,9 @@ private:
         return NULL;
     }
 
+    // Helper of public Expand(), must be called with a valid node.
+    void DoExpand(wxDataViewTreeNode* node, unsigned int row, bool expandChildren);
+
 private:
     wxDataViewCtrl             *m_owner;
     int                         m_lineHeight;
@@ -983,8 +1021,7 @@ private:
 
     bool                        m_dropEnabled;
     wxDataFormat                m_dropFormat;
-    bool                        m_dropHint;
-    unsigned int                m_dropHintLine;
+    DropItemInfo                m_dropItemInfo;
 #endif // wxUSE_DRAG_AND_DROP
 
     // for double click logic
@@ -1853,9 +1890,10 @@ void wxDataViewTreeNode::Resort(wxDataViewMainWindow* window)
     {
         wxDataViewTreeNodes& nodes = m_branchData->children;
 
-        // Only sort the children if they aren't already sorted by the wanted
-        // criteria.
-        if ( m_branchData->sortOrder != sortOrder )
+        // When sorting by column value, we can skip resorting entirely if the
+        // same sort order was used previously. However we can't do this when
+        // using model-specific sort order, which can change at any time.
+        if ( m_branchData->sortOrder != sortOrder || !sortOrder.UsesColumn() )
         {
             std::sort(m_branchData->children.begin(),
                       m_branchData->children.end(),
@@ -2026,8 +2064,7 @@ wxDataViewMainWindow::wxDataViewMainWindow( wxDataViewCtrl *parent, wxWindowID i
 
     m_dragEnabled = false;
     m_dropEnabled = false;
-    m_dropHint = false;
-    m_dropHintLine = (unsigned int) -1;
+    m_dropItemInfo = DropItemInfo();
 #endif // wxUSE_DRAG_AND_DROP
 
     m_lineLastClicked = (unsigned int) -1;
@@ -2093,69 +2130,245 @@ bool wxDataViewMainWindow::EnableDropTarget( const wxDataFormat &format )
     return true;
 }
 
-void wxDataViewMainWindow::RemoveDropHint()
+void wxDataViewMainWindow::RefreshDropHint()
 {
-    if (m_dropHint)
+    const unsigned row = m_dropItemInfo.m_row;
+
+    switch (m_dropItemInfo.m_hint)
     {
-            m_dropHint = false;
-            RefreshRow( m_dropHintLine );
-            m_dropHintLine = (unsigned int) -1;
+        case DropHint_None:
+            break;
+
+        case DropHint_Inside:
+            RefreshRow(row);
+            break;
+
+        case DropHint_Above:
+            RefreshRows(row == 0 ? 0 : row - 1, row);
+            break;
+
+        case DropHint_Below:
+            // It's not a problem here if row+1 is out of range, RefreshRows()
+            // allows this.
+            RefreshRows(row, row + 1);
+            break;
     }
 }
+
+void wxDataViewMainWindow::RemoveDropHint()
+{
+    RefreshDropHint();
+
+    m_dropItemInfo = DropItemInfo();
+}
+
+wxDataViewMainWindow::DropItemInfo wxDataViewMainWindow::GetDropItemInfo(const wxCoord x, const wxCoord y)
+{
+    DropItemInfo dropItemInfo;
+
+    int xx = x;
+    int yy = y;
+    m_owner->CalcUnscrolledPosition( xx, yy, &xx, &yy );
+
+    unsigned int row = GetLineAt(yy);
+    dropItemInfo.m_row = row;
+
+    if (row >= GetRowCount() || xx > GetEndOfLastCol())
+        return dropItemInfo;
+
+    if (IsVirtualList())
+    {
+        dropItemInfo.m_item = GetItemByRow(row);
+
+        if (dropItemInfo.m_item.IsOk())
+            dropItemInfo.m_hint = DropHint_Inside;
+    }
+    else
+    {
+        wxDataViewTreeNode* node = GetTreeNodeByRow(row);
+        if (!node)
+            return dropItemInfo;
+
+        dropItemInfo.m_item = node->GetItem();
+
+        const int itemStart = GetLineStart(row);
+        const int itemHeight = GetLineHeight(row);
+
+        // 15% is an arbitrarily chosen threshold here, which could be changed
+        // or made configurable if really needed.
+        static const double UPPER_ITEM_PART = 0.15;
+
+        bool insertAbove = yy - itemStart < itemHeight*UPPER_ITEM_PART;
+        if (insertAbove)
+        {
+            // Can be treated as 'insertBelow" with the small difference:
+            node = GetTreeNodeByRow(row - 1);   // We need the node from the previous row
+
+            dropItemInfo.m_hint = DropHint_Above;
+
+            if (!node)
+            {
+                // Seems to be dropped in the root node
+
+                dropItemInfo.m_indentLevel        = 0;
+                dropItemInfo.m_proposedDropIndex  = 0;
+                dropItemInfo.m_item               = wxDataViewItem();
+
+                return dropItemInfo;
+            }
+
+        }
+
+        bool insertBelow = yy - itemStart > itemHeight*(1.0 - UPPER_ITEM_PART);
+        if (insertBelow)
+            dropItemInfo.m_hint = DropHint_Below;
+
+        if (insertBelow || insertAbove)
+        {
+            // Insert inside the 'item' or after (below) it. Depends on:
+            // 1 - the 'item' is a container
+            // 2 - item's child index in it's parent (the last in the parent or not)
+            // 3 - expanded (opened) or not
+            // 4 - mouse x position
+
+            int xStart = 0;     // Expander column x position start
+            wxDataViewColumn* const expander = GetExpanderColumnOrFirstOne(GetOwner());
+            for (unsigned int i = 0; i < GetOwner()->GetColumnCount(); i++)
+            {
+                wxDataViewColumn* col = GetOwner()->GetColumnAt(i);
+                if (col->IsHidden())
+                    continue;   // skip it!
+
+                if (col == expander)
+                    break;
+
+                xStart += col->GetWidth();
+            }
+
+            const int expanderWidth = wxRendererNative::Get().GetExpanderSize(this).GetWidth();
+
+            int level = node->GetIndentLevel();
+
+            wxDataViewTreeNode* prevAscendNode = node;
+            wxDataViewTreeNode* ascendNode = node;
+            while (ascendNode != NULL)
+            {
+                dropItemInfo.m_indentLevel = level + 1;
+
+                if (m_owner->GetModel()->IsContainer(ascendNode->GetItem()))
+                {
+                    // Item can be inserted
+                    dropItemInfo.m_item = ascendNode->GetItem();
+
+                    int itemPosition = ascendNode->FindChildByItem(prevAscendNode->GetItem());
+                    if ( itemPosition == wxNOT_FOUND )
+                        itemPosition = 0;
+                    else
+                        itemPosition++;
+
+                    dropItemInfo.m_proposedDropIndex = itemPosition;
+
+                    // We must break the loop if the applied node is expanded
+                    // (opened) and the proposed drop position is not the last
+                    // in this node.
+                    if ( ascendNode->IsOpen() )
+                    {
+                        const size_t lastPos = ascendNode->GetChildNodes().size();
+                        if ( static_cast<size_t>(itemPosition) != lastPos )
+                            break;
+                    }
+
+                    int indent = GetOwner()->GetIndent()*level + expanderWidth;
+
+                    if (xx >= xStart + indent)
+                        break;
+                }
+
+                prevAscendNode = ascendNode;
+                ascendNode = ascendNode->GetParent();
+                --level;
+            }
+        }
+        else
+        {
+            dropItemInfo.m_hint = DropHint_Inside;
+        }
+    }
+
+    return dropItemInfo;
+}
+
 
 wxDragResult wxDataViewMainWindow::OnDragOver( wxDataFormat format, wxCoord x,
                                                wxCoord y, wxDragResult def )
 {
-    int xx = x;
-    int yy = y;
-    m_owner->CalcUnscrolledPosition( xx, yy, &xx, &yy );
-    unsigned int row = GetLineAt( yy );
+    DropItemInfo nextDropItemInfo = GetDropItemInfo(x, y);
 
-    wxDataViewItem item;
-
-    if ( row < GetRowCount() && xx <= GetEndOfLastCol() )
-        item = GetItemByRow( row );
-
-    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, m_owner, item);
+    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, m_owner, nextDropItemInfo.m_item);
+    event.SetProposedDropIndex(nextDropItemInfo.m_proposedDropIndex);
     event.SetDataFormat( format );
     event.SetDropEffect( def );
-    if ( !m_owner->HandleWindowEvent( event ) || !event.IsAllowed() )
+
+    wxDragResult result = def;
+
+    if (m_owner->HandleWindowEvent(event) && event.IsAllowed())
+    {
+        // Processing handled event
+
+        result = event.GetDropEffect();
+        switch (result)
+        {
+            case wxDragCopy:
+            case wxDragMove:
+            case wxDragLink:
+                break;
+
+            case wxDragNone:
+            case wxDragCancel:
+            case wxDragError:
+            {
+                RemoveDropHint();
+                return result;
+            }
+        }
+    }
+    else
     {
         RemoveDropHint();
         return wxDragNone;
     }
 
-    if ( item.IsOk() )
+    if (nextDropItemInfo.m_hint != DropHint_None)
     {
-        if (m_dropHint && (row != m_dropHintLine))
-            RefreshRow( m_dropHintLine );
-        m_dropHint = true;
-        m_dropHintLine = row;
-        RefreshRow( row );
+        if (m_dropItemInfo.m_hint != nextDropItemInfo.m_hint ||
+            m_dropItemInfo.m_row != nextDropItemInfo.m_row)
+        {
+            RefreshDropHint();   // refresh previous rows
+        }
+
+        m_dropItemInfo.m_hint   = nextDropItemInfo.m_hint;
+        m_dropItemInfo.m_row    = nextDropItemInfo.m_row;
+
+        RefreshDropHint();
     }
     else
     {
         RemoveDropHint();
     }
 
-    return def;
+    m_dropItemInfo = nextDropItemInfo;
+
+    return result;
 }
 
 bool wxDataViewMainWindow::OnDrop( wxDataFormat format, wxCoord x, wxCoord y )
 {
     RemoveDropHint();
 
-    int xx = x;
-    int yy = y;
-    m_owner->CalcUnscrolledPosition( xx, yy, &xx, &yy );
-    unsigned int row = GetLineAt( yy );
+    DropItemInfo dropItemInfo = GetDropItemInfo(x, y);
 
-    wxDataViewItem item;
-
-    if ( row < GetRowCount() && xx <= GetEndOfLastCol())
-       item = GetItemByRow( row );
-
-    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, m_owner, item);
+    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP_POSSIBLE, m_owner, dropItemInfo.m_item);
+    event.SetProposedDropIndex(dropItemInfo.m_proposedDropIndex);
     event.SetDataFormat( format );
     if (!m_owner->HandleWindowEvent( event ) || !event.IsAllowed())
         return false;
@@ -2166,19 +2379,12 @@ bool wxDataViewMainWindow::OnDrop( wxDataFormat format, wxCoord x, wxCoord y )
 wxDragResult wxDataViewMainWindow::OnData( wxDataFormat format, wxCoord x, wxCoord y,
                                            wxDragResult def )
 {
-    int xx = x;
-    int yy = y;
-    m_owner->CalcUnscrolledPosition( xx, yy, &xx, &yy );
-    unsigned int row = GetLineAt( yy );
-
-    wxDataViewItem item;
-
-    if ( row < GetRowCount() && xx <= GetEndOfLastCol() )
-        item = GetItemByRow( row );
+    DropItemInfo dropItemInfo = GetDropItemInfo(x, y);
 
     wxCustomDataObject *obj = (wxCustomDataObject *) GetDropTarget()->GetDataObject();
 
-    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP, m_owner, item);
+    wxDataViewEvent event(wxEVT_DATAVIEW_ITEM_DROP, m_owner, dropItemInfo.m_item);
+    event.SetProposedDropIndex(dropItemInfo.m_proposedDropIndex);
     event.SetDataFormat( format );
     event.SetDataSize( obj->GetSize() );
     event.SetDataBuffer( obj->GetData() );
@@ -2548,13 +2754,15 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
     }
 
 #if wxUSE_DRAG_AND_DROP
-    if (m_dropHint)
+    wxRect dropItemRect;
+
+    if (m_dropItemInfo.m_hint == DropHint_Inside)
     {
-        wxRect rect( x_start, GetLineStart( m_dropHintLine ),
-                     x_last - x_start, GetLineHeight( m_dropHintLine ) );
-        dc.SetPen( *wxBLACK_PEN );
-        dc.SetBrush( *wxTRANSPARENT_BRUSH );
-        dc.DrawRectangle( rect );
+        int rect_y = GetLineStart(m_dropItemInfo.m_row);
+        int rect_h = GetLineHeight(m_dropItemInfo.m_row);
+        wxRect rect(x_start, rect_y, x_last - x_start,  rect_h);
+
+        wxRendererNative::Get().DrawItemSelectionRect(this, dc, rect, wxCONTROL_SELECTED | wxCONTROL_FOCUSED);
     }
 #endif // wxUSE_DRAG_AND_DROP
 
@@ -2582,6 +2790,7 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
             wxDataViewTreeNode *node = NULL;
             wxDataViewItem dataitem;
             const int line_height = GetLineHeight(item);
+            bool hasValue = true;
 
             if (!IsVirtualList())
             {
@@ -2594,12 +2803,9 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
 
                 dataitem = node->GetItem();
 
-                // Skip al columns  that do not have values
                 if ( !model->HasValue(dataitem, col->GetModelColumn()) )
-                {
-                    cell_rect.y += line_height;
-                    continue;
-                }
+                    hasValue = false;
+
             }
             else
             {
@@ -2616,7 +2822,8 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
                 state |= wxDATAVIEW_CELL_SELECTED;
 
             cell->SetState(state);
-            cell->PrepareForItem(model, dataitem, col->GetModelColumn());
+            if (hasValue)
+                cell->PrepareForItem(model, dataitem, col->GetModelColumn());
 
             // draw the background
             if ( !selected )
@@ -2658,6 +2865,21 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
 
                 // force the expander column to left-center align
                 cell->SetAlignment( wxALIGN_CENTER_VERTICAL );
+
+#if wxUSE_DRAG_AND_DROP
+                if (item == m_dropItemInfo.m_row)
+                {
+                    dropItemRect = cell_rect;
+                    dropItemRect.x += expSize.GetWidth();
+                    dropItemRect.width -= expSize.GetWidth();
+                    if (m_dropItemInfo.m_indentLevel >= 0)
+                    {
+                        int hintIndent = GetOwner()->GetIndent()*m_dropItemInfo.m_indentLevel;
+                        dropItemRect.x += hintIndent;
+                        dropItemRect.width -= hintIndent;
+                    }
+                }
+#endif
             }
 
             wxRect item_rect = cell_rect;
@@ -2682,13 +2904,28 @@ void wxDataViewMainWindow::OnPaint( wxPaintEvent &WXUNUSED(event) )
             //       make its own renderer and thus we cannot be sure of that.
             wxDCClipper clip(dc, item_rect);
 
-            cell->WXCallRender(item_rect, &dc, state);
+            if (hasValue)
+                cell->WXCallRender(item_rect, &dc, state);
 
             cell_rect.y += line_height;
         }
 
         cell_rect.x += cell_rect.width;
     }
+
+#if wxUSE_DRAG_AND_DROP
+    if (m_dropItemInfo.m_hint == DropHint_Below || m_dropItemInfo.m_hint == DropHint_Above)
+    {
+        const int insertLineHeight = 2;     // TODO: setup (should be even)
+
+        int rect_y = dropItemRect.y - insertLineHeight/2;     // top insert
+        if (m_dropItemInfo.m_hint == DropHint_Below)
+            rect_y += dropItemRect.height;                    // bottom insert
+
+        wxRect rect(dropItemRect.x, rect_y, dropItemRect.width, insertLineHeight);
+        wxRendererNative::Get().DrawItemSelectionRect(this, dc, rect, wxCONTROL_SELECTED);
+    }
+#endif // wxUSE_DRAG_AND_DROP
 }
 
 
@@ -2770,6 +3007,10 @@ void wxDataViewHeaderWindow::FinishEditing()
 //-----------------------------------------------------------------------------
 // Helper class for do operation on the tree node
 //-----------------------------------------------------------------------------
+
+namespace
+{
+
 class DoJob
 {
 public:
@@ -2787,7 +3028,8 @@ public:
     virtual int operator() ( wxDataViewTreeNode * node ) = 0;
 };
 
-bool Walker( wxDataViewTreeNode * node, DoJob & func )
+bool
+Walker(wxDataViewTreeNode * node, DoJob & func, WalkFlags flags = Walk_All)
 {
     wxCHECK_MSG( node, false, "can't walk NULL node" );
 
@@ -2801,7 +3043,7 @@ bool Walker( wxDataViewTreeNode * node, DoJob & func )
             break;
     }
 
-    if ( node->HasChildren() )
+    if ( node->HasChildren() && (flags != Walk_ExpandedOnly || node->IsOpen()) )
     {
         const wxDataViewTreeNodes& nodes = node->GetChildNodes();
 
@@ -2809,13 +3051,15 @@ bool Walker( wxDataViewTreeNode * node, DoJob & func )
               i != nodes.end();
               ++i )
         {
-            if ( Walker(*i, func) )
+            if ( Walker(*i, func, flags) )
                 return true;
         }
     }
 
     return false;
 }
+
+} // anonymous namespace
 
 bool wxDataViewMainWindow::ItemAdded(const wxDataViewItem & parent, const wxDataViewItem & item)
 {
@@ -2836,14 +3080,6 @@ bool wxDataViewMainWindow::ItemAdded(const wxDataViewItem & parent, const wxData
             return false;
 
         parentNode->SetHasChildren(true);
-
-        // If the parent node isn't and hadn't been opened yet, we don't have
-        // anything to do here, all the items will be added to it when it's
-        // opened for the first time.
-        if ( !parentNode->IsOpen() && parentNode->GetChildNodes().empty() )
-        {
-            return true;
-        }
 
         wxDataViewTreeNode *itemNode = new wxDataViewTreeNode(parentNode, item);
         itemNode->SetHasChildren(GetModel()->IsContainer(item));
@@ -3677,7 +3913,7 @@ bool wxDataViewMainWindow::HasChildren( unsigned int row ) const
     return true;
 }
 
-void wxDataViewMainWindow::Expand( unsigned int row )
+void wxDataViewMainWindow::Expand( unsigned int row, bool expandChildren )
 {
     if (IsList())
         return;
@@ -3686,15 +3922,16 @@ void wxDataViewMainWindow::Expand( unsigned int row )
     if (!node)
         return;
 
+    return DoExpand(node, row, expandChildren);
+}
+
+void
+wxDataViewMainWindow::DoExpand(wxDataViewTreeNode* node,
+                               unsigned int row,
+                               bool expandChildren)
+{
     if (!node->HasChildren())
         return;
-
-    if ( m_rowHeightCache )
-    {
-        // Expand makes new rows visible thus we invalidates all following
-        // rows in the height cache
-        m_rowHeightCache->Remove(row);
-    }
 
     if (!node->IsOpen())
     {
@@ -3702,6 +3939,13 @@ void wxDataViewMainWindow::Expand( unsigned int row )
         {
             // Vetoed by the event handler.
             return;
+        }
+
+        if ( m_rowHeightCache )
+        {
+            // Expand makes new rows visible thus we invalidates all following
+            // rows in the height cache
+            m_rowHeightCache->Remove(row);
         }
 
         node->ToggleOpen(this);
@@ -3730,6 +3974,28 @@ void wxDataViewMainWindow::Expand( unsigned int row )
         UpdateDisplay();
         // Send the expanded event
         SendExpanderEvent(wxEVT_DATAVIEW_ITEM_EXPANDED,node->GetItem());
+    }
+
+    // Note that we have to expand the children when expanding recursively even
+    // when this node itself was already open.
+    if ( expandChildren )
+    {
+        const wxDataViewTreeNodes& children = node->GetChildNodes();
+
+        for ( wxDataViewTreeNodes::const_iterator i = children.begin();
+              i != children.end();
+              ++i )
+        {
+            wxDataViewTreeNode* const child = *i;
+
+            // Row currently corresponds to the previous item, so increment it
+            // first to correspond to this child.
+            DoExpand(child, ++row, true);
+
+            // We don't need +1 here because we'll increment the row during the
+            // next loop iteration.
+            row += child->GetSubTreeCount();
+        }
     }
 }
 
@@ -3914,7 +4180,7 @@ wxRect wxDataViewMainWindow::GetItemRect( const wxDataViewItem & item,
         xpos = 0;
     }
 
-    const int row = GetRowByItem(item);
+    const int row = GetRowByItem(item, Walk_ExpandedOnly);
     if ( row == -1 )
     {
         // This means the row is currently not visible at all.
@@ -4015,7 +4281,9 @@ private:
 
 };
 
-int wxDataViewMainWindow::GetRowByItem(const wxDataViewItem & item) const
+int
+wxDataViewMainWindow::GetRowByItem(const wxDataViewItem & item,
+                                   WalkFlags flags) const
 {
     const wxDataViewModel * model = GetModel();
     if( model == NULL )
@@ -4045,7 +4313,7 @@ int wxDataViewMainWindow::GetRowByItem(const wxDataViewItem & item) const
         // the parent chain was created by adding the deepest parent first.
         // so if we want to start at the root node, we have to iterate backwards through the vector
         ItemToRowJob job( item, parentChain.rbegin() );
-        if ( !Walker( m_root, job ) )
+        if ( !Walker( m_root, job, flags ) )
             return -1;
 
         return job.GetResult();
@@ -4347,7 +4615,27 @@ void wxDataViewMainWindow::OnChar( wxKeyEvent &event )
         case WXK_DOWN:
             OnVerticalNavigation(event, +1);
             break;
-        // Add the process for tree expanding/collapsing
+
+        case '+':
+        case WXK_ADD:
+            Expand(m_currentRow);
+            break;
+
+        case '*':
+        case WXK_MULTIPLY:
+            if ( !IsExpanded(m_currentRow) )
+            {
+                Expand(m_currentRow, true /* recursively */);
+                break;
+            }
+            //else: fall through to Collapse()
+            wxFALLTHROUGH;
+
+        case '-':
+        case WXK_SUBTRACT:
+            Collapse(m_currentRow);
+            break;
+
         case WXK_LEFT:
             OnLeftKey(event);
             break;
@@ -5652,22 +5940,27 @@ public:
 
     virtual void UpdateWithRow(int row) wxOVERRIDE
     {
-        int indent = 0;
+        int width = 0;
         wxDataViewItem item;
 
         if ( m_isExpanderCol )
         {
             wxDataViewTreeNode *node = m_clientArea->GetTreeNodeByRow(row);
             item = node->GetItem();
-            indent = m_dvc->GetIndent() * node->GetIndentLevel() + m_expanderSize;
+            width = m_dvc->GetIndent() * node->GetIndentLevel() + m_expanderSize;
         }
         else
         {
             item = m_clientArea->GetItemByRow(row);
         }
 
-        m_renderer->PrepareForItem(m_model, item, GetColumn());
-        UpdateWithWidth(m_renderer->GetSize().x + indent);
+        if ( m_model->HasValue(item, GetColumn()) )
+        {
+            m_renderer->PrepareForItem(m_model, item, GetColumn());
+            width += m_renderer->GetSize().x;
+        }
+
+        UpdateWithWidth(width);
     }
 
 private:
@@ -6077,11 +6370,11 @@ int wxDataViewCtrl::GetRowByItem( const wxDataViewItem & item ) const
     return m_clientArea->GetRowByItem( item );
 }
 
-void wxDataViewCtrl::DoExpand( const wxDataViewItem & item )
+void wxDataViewCtrl::DoExpand( const wxDataViewItem & item, bool expandChildren )
 {
     int row = m_clientArea->GetRowByItem( item );
     if (row != -1)
-        m_clientArea->Expand(row);
+        m_clientArea->Expand(row, expandChildren);
 }
 
 void wxDataViewCtrl::Collapse( const wxDataViewItem & item )

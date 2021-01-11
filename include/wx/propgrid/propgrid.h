@@ -593,7 +593,7 @@ enum wxPG_INTERNAL_FLAGS
 // used to do the very same thing, but it hasn't been updated for a while
 // and it is currently deprecated.
 // Please note that most member functions are inherited and as such not
-// documented heree. This means you will probably also want to read
+// documented here. This means you will probably also want to read
 // wxPropertyGridInterface class reference.
 // To process input from a propertygrid control, use these event handler
 // macros to direct input to member functions that take a wxPropertyGridEvent
@@ -672,7 +672,7 @@ public:
                     const wxPoint& pos = wxDefaultPosition,
                     const wxSize& size = wxDefaultSize,
                     long style = wxPG_DEFAULT_STYLE,
-                    const wxString& name = wxPropertyGridNameStr );
+                    const wxString& name = wxASCII_STR(wxPropertyGridNameStr) );
 
     // Destructor
     virtual ~wxPropertyGrid();
@@ -741,7 +741,7 @@ public:
                  const wxPoint& pos = wxDefaultPosition,
                  const wxSize& size = wxDefaultSize,
                  long style = wxPG_DEFAULT_STYLE,
-                 const wxString& name = wxPropertyGridNameStr );
+                 const wxString& name = wxASCII_STR(wxPropertyGridNameStr) );
 
     // Call when editor widget's contents is modified.
     // For example, this is called when changes text in wxTextCtrl (used in
@@ -1591,11 +1591,12 @@ protected:
     // 0 = not dragging, 1 = drag just started, 2 = drag in progress
     unsigned char       m_dragStatus;
 
+#if WXWIN_COMPATIBILITY_3_0
+    // Unused variable.
     // 0 = margin, 1 = label, 2 = value.
     unsigned char       m_mouseSide;
 
     // True when editor control is focused.
-#if WXWIN_COMPATIBILITY_3_0
     unsigned char       m_editorFocused;
 #else
     bool                m_editorFocused;
@@ -1634,8 +1635,8 @@ protected:
     int                 m_clearThisMany;
 #endif
 
-    // Mouse is hovering over this column (index)
-    unsigned int        m_colHover;
+    // Mouse is hovering over this column (index), -1 for margin
+    int                 m_colHover;
 
     // pointer to property that has mouse hovering
     wxPGProperty*       m_propHover;

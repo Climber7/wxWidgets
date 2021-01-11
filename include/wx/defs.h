@@ -98,7 +98,7 @@
      */
     #pragma warning(disable: 4127) /*  conditional expression is constant */
 
-    /* There are too many false positivies for this one, particularly when
+    /* There are too many false positives for this one, particularly when
        using templates like wxVector<T> */
     /* class 'foo' needs to have dll-interface to be used by clients of
        class 'bar'" */
@@ -156,11 +156,6 @@
         #endif
     #endif /* VC++ 8 */
 #endif /*  __VISUALC__ */
-
-/*  suppress some Borland C++ warnings */
-#ifdef __BORLANDC__
-#   pragma warn -inl                /*  Functions containing reserved words and certain constructs are not expanded inline */
-#endif /*  __BORLANDC__ */
 
 /*
    g++ gives a warning when a class has private dtor if it has no friends but
@@ -481,10 +476,9 @@ typedef short int WXTYPE;
 
 #ifndef HAVE_WOSTREAM
     /*
-        Mingw <= 3.4 and all versions of Cygwin don't have std::wostream
+        Cygwin is the only platform which doesn't have std::wostream
      */
-    #if (!defined(__MINGW32__) || wxCHECK_GCC_VERSION(4, 0)) && \
-        !defined(__CYGWIN__)
+    #if !defined(__CYGWIN__)
         #define HAVE_WOSTREAM
     #endif
 #endif /* HAVE_WOSTREAM */
@@ -498,7 +492,6 @@ typedef short int WXTYPE;
     #if defined(__GNUWIN32__)
         #define wxSTDCALL __attribute__((stdcall))
     #else
-        /*  both VC++ and Borland understand this */
         #define wxSTDCALL _stdcall
     #endif
 
@@ -543,12 +536,14 @@ typedef short int WXTYPE;
 /*  ---------------------------------------------------------------------------- */
 
 /*  Printf-like attribute definitions to obtain warnings with GNU C/C++ */
+#if defined(__GNUC__) && !wxUSE_UNICODE
+#    define WX_ATTRIBUTE_FORMAT(like, m, n) __attribute__ ((__format__ (like, m, n)))
+#else
+#    define WX_ATTRIBUTE_FORMAT(like, m, n)
+#endif
+
 #ifndef WX_ATTRIBUTE_PRINTF
-#   if defined(__GNUC__) && !wxUSE_UNICODE
-#       define WX_ATTRIBUTE_PRINTF(m, n) __attribute__ ((__format__ (__printf__, m, n)))
-#   else
-#       define WX_ATTRIBUTE_PRINTF(m, n)
-#   endif
+#   define WX_ATTRIBUTE_PRINTF(m, n) WX_ATTRIBUTE_FORMAT(__printf__, m, n)
 
 #   define WX_ATTRIBUTE_PRINTF_1 WX_ATTRIBUTE_PRINTF(1, 2)
 #   define WX_ATTRIBUTE_PRINTF_2 WX_ATTRIBUTE_PRINTF(2, 3)
@@ -622,15 +617,11 @@ typedef short int WXTYPE;
  */
 #define wxDEPRECATED(x) wxDEPRECATED_DECL x
 
-#if defined(__GNUC__) && !wxCHECK_GCC_VERSION(3, 4)
-    /*
-        We need to add dummy "inline" to allow gcc < 3.4 to handle the
-        deprecation attribute on the constructors.
-    */
-    #define  wxDEPRECATED_CONSTRUCTOR(x) wxDEPRECATED( inline x)
-#else
-    #define  wxDEPRECATED_CONSTRUCTOR(x) wxDEPRECATED(x)
-#endif
+/*
+    This macro used to be defined differently for gcc < 3.4, but we don't
+    support it any more, so it's just the same thing as wxDEPRECATED now.
+ */
+#define wxDEPRECATED_CONSTRUCTOR(x) wxDEPRECATED(x)
 
 /*
    Macro which marks the function as being deprecated but also defines it
@@ -667,6 +658,9 @@ typedef short int WXTYPE;
         wxGCC_WARNING_SUPPRESS(float-equal)
         inline bool wxIsSameDouble(double x, double y) { return x == y; }
         wxGCC_WARNING_RESTORE(float-equal)
+
+   Note that these macros apply to both gcc and clang, even though they only
+   have "GCC" in their names.
  */
 #if defined(__clang__) || wxCHECK_GCC_VERSION(4, 6)
 #   define wxGCC_WARNING_SUPPRESS(x) \
@@ -677,6 +671,17 @@ typedef short int WXTYPE;
 #else /* gcc < 4.6 or not gcc and not clang at all */
 #   define wxGCC_WARNING_SUPPRESS(x)
 #   define wxGCC_WARNING_RESTORE(x)
+#endif
+
+/*
+    Similar macros but for gcc-specific warnings.
+ */
+#ifdef __GNUC__
+#   define wxGCC_ONLY_WARNING_SUPPRESS(x) wxGCC_WARNING_SUPPRESS(x)
+#   define wxGCC_ONLY_WARNING_RESTORE(x) wxGCC_WARNING_RESTORE(x)
+#else
+#   define wxGCC_ONLY_WARNING_SUPPRESS(x)
+#   define wxGCC_ONLY_WARNING_RESTORE(x)
 #endif
 
 /* Specific macros for -Wcast-function-type warning new in gcc 8. */
@@ -711,6 +716,28 @@ typedef short int WXTYPE;
 #else
 #    define wxCLANG_WARNING_SUPPRESS(x)
 #    define wxCLANG_WARNING_RESTORE(x)
+#endif
+
+/*
+    Specific macro for disabling warnings related to not using override: this
+    has to be done differently for gcc and clang and is only supported since
+    gcc 5.1.
+ */
+#if defined(__clang__)
+#   define wxWARNING_SUPPRESS_MISSING_OVERRIDE() \
+        wxCLANG_WARNING_SUPPRESS(suggest-override) \
+        wxCLANG_WARNING_SUPPRESS(inconsistent-missing-override)
+#   define wxWARNING_RESTORE_MISSING_OVERRIDE() \
+        wxCLANG_WARNING_RESTORE(inconsistent-missing-override) \
+        wxCLANG_WARNING_RESTORE(suggest-override)
+#elif wxCHECK_GCC_VERSION(5, 1)
+#   define wxWARNING_SUPPRESS_MISSING_OVERRIDE() \
+        wxGCC_WARNING_SUPPRESS(suggest-override)
+#   define wxWARNING_RESTORE_MISSING_OVERRIDE() \
+        wxGCC_WARNING_RESTORE(suggest-override)
+#else
+#   define wxWARNING_SUPPRESS_MISSING_OVERRIDE()
+#   define wxWARNING_RESTORE_MISSING_OVERRIDE()
 #endif
 
 /*
@@ -847,12 +874,8 @@ typedef short int WXTYPE;
 /*  sometimes the value of a variable is *really* not used, to suppress  the */
 /*  resulting warning you may pass it to this function */
 #ifdef __cplusplus
-#   ifdef __BORLANDC__
-#       define wxUnusedVar(identifier) identifier
-#   else
-        template <class T>
-            inline void wxUnusedVar(const T& WXUNUSED(t)) { }
-#   endif
+    template <class T>
+        inline void wxUnusedVar(const T& WXUNUSED(t)) { }
 #endif
 
 /*  ---------------------------------------------------------------------------- */
@@ -2130,6 +2153,7 @@ enum wxDataFormatId
     wxDF_LOCALE =           16,
     wxDF_PRIVATE =          20,
     wxDF_HTML =             30, /* Note: does not correspond to CF_ constant */
+    wxDF_PNG =              31, /* Note: does not correspond to CF_ constant */
     wxDF_MAX
 };
 
@@ -2777,6 +2801,8 @@ typedef WX_NSPasteboard OSXPasteboard;
 
 #elif wxOSX_USE_IPHONE
 
+DECLARE_WXCOCOA_OBJC_CLASS(UIMenu);
+DECLARE_WXCOCOA_OBJC_CLASS(UIMenuItem);
 DECLARE_WXCOCOA_OBJC_CLASS(UIWindow);
 DECLARE_WXCOCOA_OBJC_CLASS(UImage);
 DECLARE_WXCOCOA_OBJC_CLASS(UIView);
@@ -2791,6 +2817,7 @@ DECLARE_WXCOCOA_OBJC_CLASS(UIPasteboard);
 typedef WX_UIWindow WXWindow;
 typedef WX_UIView WXWidget;
 typedef WX_UIImage WXImage;
+typedef WX_UIMenu WXHMENU;
 typedef WX_EAGLContext WXGLContext;
 typedef WX_NSString WXGLPixelFormat;
 typedef WX_UIWebView OSXWebViewPtr;

@@ -19,9 +19,6 @@
 // for compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_SPINCTRL
 
@@ -421,6 +418,10 @@ int wxSpinCtrl::GetBase() const
 
 bool wxSpinCtrl::SetBase(int base)
 {
+    // For negative values in the range only base == 10 is allowed
+    if ( !wxSpinCtrlImpl::IsBaseCompatibleWithRange(m_min, m_max, base) )
+        return false;
+
     if ( !::SendMessage(GetHwnd(), UDM_SETBASE, base, 0) )
         return false;
 
@@ -537,6 +538,12 @@ WXHWND wxSpinCtrl::MSWGetFocusHWND() const
 
 void wxSpinCtrl::SetRange(int minVal, int maxVal)
 {
+    // Negative values in the range are allowed only if base == 10
+    if ( !wxSpinCtrlImpl::IsBaseCompatibleWithRange(minVal, maxVal, GetBase()) )
+    {
+        return;
+    }
+
     // Manually adjust the old value to avoid an event being sent from
     // NormalizeValue() called from inside the base class SetRange() as we're
     // not supposed to generate any events from here.

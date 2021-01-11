@@ -19,9 +19,6 @@
 
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_AUI
 
@@ -69,11 +66,7 @@ wxBitmap wxAuiBitmapFromBits(const unsigned char bits[], int w, int h,
 static wxColor GetBaseColor()
 {
 
-#if defined( __WXMAC__ ) && wxOSX_USE_COCOA_OR_CARBON
-    wxColor baseColour = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
-#else
     wxColor baseColour = wxSystemSettings::GetColour(wxSYS_COLOUR_3DFACE);
-#endif
 
     // the baseColour is too pale to use as our base colour,
     // so darken it a bit --
@@ -120,13 +113,6 @@ private:
 };
 
 
-
-static const unsigned char
-    DISABLED_TEXT_GREY_HUE = wxColour::AlphaBlend(0, 255, 0.4);
-const wxColour DISABLED_TEXT_COLOR(DISABLED_TEXT_GREY_HUE,
-                                   DISABLED_TEXT_GREY_HUE,
-                                   DISABLED_TEXT_GREY_HUE);
-
 wxAuiGenericToolBarArt::wxAuiGenericToolBarArt()
 {
     UpdateColoursFromSystem();
@@ -139,18 +125,6 @@ wxAuiGenericToolBarArt::wxAuiGenericToolBarArt()
     m_overflowSize  = wxWindow::FromDIP(16, NULL);
     m_dropdownSize  = wxWindow::FromDIP(10, NULL);
 
-    // TODO: Provide x1.5 and x2.0 versions or migrate to SVG.
-    static const unsigned char buttonDropdownBits[] = { 0xe0, 0xf1, 0xfb };
-    static const unsigned char overflowBits[] = { 0x80, 0xff, 0x80, 0xc1, 0xe3, 0xf7 };
-
-    m_buttonDropDownBmp = wxAuiBitmapFromBits(buttonDropdownBits, 5, 3,
-                                              wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
-    m_disabledButtonDropDownBmp = wxAuiBitmapFromBits(
-                                                buttonDropdownBits, 5, 3,
-                                                wxColor(128,128,128));
-    m_overflowBmp = wxAuiBitmapFromBits(overflowBits, 7, 6,
-                                        wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
-    m_disabledOverflowBmp = wxAuiBitmapFromBits(overflowBits, 7, 6, wxColor(128,128,128));
 
     m_font = *wxNORMAL_FONT;
 }
@@ -175,6 +149,21 @@ void wxAuiGenericToolBarArt::UpdateColoursFromSystem()
     m_gripperPen1 = wxPen(darker5Colour, pen_width);
     m_gripperPen2 = wxPen(darker3Colour, pen_width);
     m_gripperPen3 = wxPen(*wxStockGDI::GetColour(wxStockGDI::COLOUR_WHITE), pen_width);
+
+    // Note: update the bitmaps here as they depend on the system colours too.
+
+    // TODO: Provide x1.5 and x2.0 versions or migrate to SVG.
+    static const unsigned char buttonDropdownBits[] = { 0xe0, 0xf1, 0xfb };
+    static const unsigned char overflowBits[] = { 0x80, 0xff, 0x80, 0xc1, 0xe3, 0xf7 };
+
+    m_buttonDropDownBmp = wxAuiBitmapFromBits(buttonDropdownBits, 5, 3,
+                                              wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
+    m_disabledButtonDropDownBmp = wxAuiBitmapFromBits(
+                                                buttonDropdownBits, 5, 3,
+                                                wxColor(128,128,128));
+    m_overflowBmp = wxAuiBitmapFromBits(overflowBits, 7, 6,
+                                        wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
+    m_disabledOverflowBmp = wxAuiBitmapFromBits(overflowBits, 7, 6, wxColor(128,128,128));
 }
 
 void wxAuiGenericToolBarArt::SetFlags(unsigned int flags)
@@ -249,11 +238,7 @@ void wxAuiGenericToolBarArt::DrawLabel(
                                     const wxRect& rect)
 {
     dc.SetFont(m_font);
-#ifdef __WXMAC__
-    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
-#else
-    dc.SetTextForeground(*wxBLACK);
-#endif
+    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
 
     // we only care about the text height here since the text
     // will get cropped based on the width of the item
@@ -363,14 +348,10 @@ void wxAuiGenericToolBarArt::DrawButton(
         dc.DrawBitmap(bmp, bmpX, bmpY, true);
 
     // set the item's text color based on if it is disabled
-    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
+    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
     if (item.GetState() & wxAUI_BUTTON_STATE_DISABLED)
     {
-#ifdef __WXMAC__
-        dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_INACTIVECAPTIONTEXT));
-#else
-        dc.SetTextForeground(DISABLED_TEXT_COLOR);
-#endif
+        dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
     }
 
     if ( (m_flags & wxAUI_TB_TEXT) && !item.GetLabel().empty() )
@@ -497,14 +478,10 @@ void wxAuiGenericToolBarArt::DrawDropDownButton(
     dc.DrawBitmap(dropbmp, dropBmpX, dropBmpY, true);
 
     // set the item's text color based on if it is disabled
-    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
+    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
     if (item.GetState() & wxAUI_BUTTON_STATE_DISABLED)
     {
-#ifdef __WXMAC__
-        dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_INACTIVECAPTIONTEXT));
-#else
-        dc.SetTextForeground(DISABLED_TEXT_COLOR);
-#endif
+        dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_GRAYTEXT));
     }
 
     if ( (m_flags & wxAUI_TB_TEXT) && !item.GetLabel().empty() )
@@ -544,11 +521,7 @@ void wxAuiGenericToolBarArt::DrawControlLabel(
         return;
 
     // set the label's text color
-#ifdef __WXMAC__
-    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_CAPTIONTEXT));
-#else
-    dc.SetTextForeground(*wxBLACK);
-#endif
+    dc.SetTextForeground(wxSystemSettings::GetColour(wxSYS_COLOUR_BTNTEXT));
 
     textX = rect.x + (rect.width/2) - (textWidth/2) + 1;
     textY = rect.y + rect.height - textHeight - 1;
@@ -1570,7 +1543,7 @@ void wxAuiToolBar::ToggleTool(int tool_id, bool state)
 {
     wxAuiToolBarItem* tool = FindTool(tool_id);
 
-    if (tool && (tool->m_kind == wxITEM_CHECK || tool->m_kind == wxITEM_RADIO))
+    if ( tool && tool->CanBeToggled() )
     {
         if (tool->m_kind == wxITEM_RADIO)
         {
@@ -1611,13 +1584,8 @@ bool wxAuiToolBar::GetToolToggled(int tool_id) const
 {
     wxAuiToolBarItem* tool = FindTool(tool_id);
 
-    if (tool)
-    {
-        if ( (tool->m_kind != wxITEM_CHECK) && (tool->m_kind != wxITEM_RADIO) )
-            return false;
-
+    if ( tool && tool->CanBeToggled() )
         return (tool->m_state & wxAUI_BUTTON_STATE_CHECKED) ? true : false;
-    }
 
     return false;
 }
@@ -2223,6 +2191,9 @@ void wxAuiToolBar::DoIdleUpdate()
 
         wxUpdateUIEvent evt(item.m_toolId);
         evt.SetEventObject(this);
+
+        if ( !item.CanBeToggled() )
+            evt.DisallowCheck();
 
         if (handler->ProcessEvent(evt))
         {
@@ -2865,7 +2836,7 @@ void wxAuiToolBar::OnMotion(wxMouseEvent& evt)
     const bool button_pressed = HasCapture();
 
     // start a drag event
-    if (!m_dragging && button_pressed &&
+    if (!m_dragging && button_pressed && m_actionItem &&
         abs(evt.GetX() - m_actionPos.x) + abs(evt.GetY() - m_actionPos.y) > 5)
     {
         // TODO: sending this event only makes sense if there is an 'END_DRAG'
@@ -2900,24 +2871,27 @@ void wxAuiToolBar::OnMotion(wxMouseEvent& evt)
         SetHoverItem(hitItem);
 
         // tooltips handling
-        wxAuiToolBarItem* packingHitItem;
-        packingHitItem = FindToolByPositionWithPacking(evt.GetX(), evt.GetY());
-        if (packingHitItem)
+        if ( !HasFlag(wxAUI_TB_NO_TOOLTIPS) )
         {
-            if (packingHitItem != m_tipItem)
+            wxAuiToolBarItem* packingHitItem;
+            packingHitItem = FindToolByPositionWithPacking(evt.GetX(), evt.GetY());
+            if ( packingHitItem )
             {
-                m_tipItem = packingHitItem;
+                if (packingHitItem != m_tipItem)
+                {
+                    m_tipItem = packingHitItem;
 
-                if ( !packingHitItem->m_shortHelp.empty() )
-                    SetToolTip(packingHitItem->m_shortHelp);
-                else
-                    UnsetToolTip();
+                    if ( !packingHitItem->m_shortHelp.empty() )
+                        SetToolTip(packingHitItem->m_shortHelp);
+                    else
+                        UnsetToolTip();
+                }
             }
-        }
-        else
-        {
-            UnsetToolTip();
-            m_tipItem = NULL;
+            else
+            {
+                UnsetToolTip();
+                m_tipItem = NULL;
+            }
         }
 
         // figure out the dropdown button state (are we hovering or pressing it?)

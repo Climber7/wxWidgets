@@ -12,9 +12,6 @@
 // For compilers that support precompilation, includes "wx/wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-#pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/wx.h"
@@ -271,7 +268,7 @@ wxDataViewItem MyMusicTreeModel::GetParent( const wxDataViewItem &item ) const
 
 bool MyMusicTreeModel::IsContainer( const wxDataViewItem &item ) const
 {
-    // the invisble root node can have children
+    // the invisible root node can have children
     // (in our model always "MyMusic")
     if (!item.IsOk())
         return true;

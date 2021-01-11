@@ -12,9 +12,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #include "wx/colour.h"
 
@@ -218,6 +215,9 @@ bool wxColourBase::FromString(const wxString& str)
 
 wxString wxColourBase::GetAsString(long flags) const
 {
+    if ( !IsOk() )
+        return wxString();
+
     wxString colName;
 
     if ( IsSolid() )

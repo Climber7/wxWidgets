@@ -18,9 +18,6 @@
 
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_AUI
 
@@ -593,6 +590,7 @@ bool wxAuiPaneInfo::IsValid() const
 wxBEGIN_EVENT_TABLE(wxAuiManager, wxEvtHandler)
     EVT_AUI_PANE_BUTTON(wxAuiManager::OnPaneButton)
     EVT_AUI_RENDER(wxAuiManager::OnRender)
+    EVT_WINDOW_DESTROY(wxAuiManager::OnDestroy)
     EVT_PAINT(wxAuiManager::OnPaint)
     EVT_ERASE_BACKGROUND(wxAuiManager::OnEraseBackground)
     EVT_SIZE(wxAuiManager::OnSize)
@@ -632,6 +630,8 @@ wxAuiManager::wxAuiManager(wxWindow* managed_wnd, unsigned int flags)
 
 wxAuiManager::~wxAuiManager()
 {
+    UnInit();
+
     // NOTE: It's possible that the windows have already been destroyed by the
     // time this dtor is called, so this loop can result in memory access via
     // invalid pointers, resulting in a crash.  So it will be disabled while
@@ -914,6 +914,8 @@ void wxAuiManager::SetManagedWindow(wxWindow* wnd)
 {
     wxASSERT_MSG(wnd, wxT("specified window must be non-NULL"));
 
+    UnInit();
+
     m_frame = wnd;
     m_frame->PushEventHandler(this);
 
@@ -950,14 +952,16 @@ void wxAuiManager::SetManagedWindow(wxWindow* wnd)
 }
 
 
-// UnInit() must be called, usually in the destructor
-// of the frame class.   If it is not called, usually this
-// will result in a crash upon program exit
+// UnInit() is called automatically by wxAuiManager itself when either the
+// manager itself or its associated frame is destroyed, but can also be called
+// explicitly, so make it safe to call it multiple times and just do nothing
+// during any calls but the first one.
 void wxAuiManager::UnInit()
 {
     if (m_frame)
     {
         m_frame->RemoveEventHandler(this);
+        m_frame = NULL;
     }
 }
 
@@ -2533,11 +2537,6 @@ void wxAuiManager::Update()
                 p.frame->Show(false);
 
             // reparent to m_frame and destroy the pane
-            if (m_actionWindow == p.frame)
-            {
-                m_actionWindow = NULL;
-            }
-
             p.window->Reparent(m_frame);
             p.frame->SetSizer(NULL);
             p.frame->Destroy();
@@ -3949,6 +3948,28 @@ void wxAuiManager::Repaint(wxDC* dc)
     // if we created a client_dc, delete it
     if (client_dc)
         delete client_dc;
+}
+
+void wxAuiManager::OnDestroy(wxWindowDestroyEvent& event)
+{
+    if ( event.GetEventObject() == m_frame )
+    {
+        wxWindow* const frame = m_frame;
+
+        UnInit();
+
+        // Just calling Skip() would be insufficient in this case, as by
+        // removing the event handler from the event handlers chain in UnInit()
+        // we'd still prevent the frame from getting this event, so we need to
+        // forward it to it manually. Note that this must be done after calling
+        // UnInit() to prevent infinite recursion.
+        if ( frame )
+            frame->ProcessWindowEventLocally(event);
+    }
+    else
+    {
+        event.Skip();
+    }
 }
 
 void wxAuiManager::OnPaint(wxPaintEvent& WXUNUSED(event))

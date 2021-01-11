@@ -10,10 +10,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#if defined(__BORLANDC__)
-#pragma hdrstop
-#endif
-
 #include "wx/msw/webview_edge.h"
 
 #if wxUSE_WEBVIEW && wxUSE_WEBVIEW_EDGE
@@ -26,6 +22,7 @@
 #include "wx/private/jsscriptwrapper.h"
 #include "wx/private/json.h"
 #include "wx/msw/private.h"
+#include "wx/msw/private/cotaskmemptr.h"
 #include "wx/msw/private/webview_edge.h"
 
 #include <wrl/event.h>
@@ -54,7 +51,7 @@ typedef HRESULT(__stdcall *GetAvailableCoreWebView2BrowserVersionString_t)(
 CreateCoreWebView2EnvironmentWithOptions_t wxCreateCoreWebView2EnvironmentWithOptions = NULL;
 GetAvailableCoreWebView2BrowserVersionString_t wxGetAvailableCoreWebView2BrowserVersionString = NULL;
 
-int wxWebViewEdgeImpl::ms_isAvailable = -1;
+bool wxWebViewEdgeImpl::ms_isInitialized = false;
 wxDynamicLibrary wxWebViewEdgeImpl::ms_loaderDll;
 
 wxWebViewEdgeImpl::wxWebViewEdgeImpl(wxWebViewEdge* webview):
@@ -79,6 +76,8 @@ bool wxWebViewEdgeImpl::Create()
 {
     m_initialized = false;
     m_isBusy = false;
+    m_pendingContextMenuEnabled = -1;
+    m_pendingAccessToDevToolsEnabled = -1;
 
     m_historyLoadingFromList = false;
     m_historyEnabled = true;
@@ -114,6 +113,9 @@ HRESULT wxWebViewEdgeImpl::OnEnvironmentCreated(
 
 bool wxWebViewEdgeImpl::Initialize()
 {
+    if (ms_isInitialized)
+        return true;
+
     if (!ms_loaderDll.Load("WebView2Loader.dll", wxDL_DEFAULT | wxDL_QUIET))
         return false;
 
@@ -124,15 +126,12 @@ bool wxWebViewEdgeImpl::Initialize()
         return false;
 
     // Check if a Edge browser can be found by the loader DLL
-    LPWSTR versionStr;
+    wxCoTaskMemPtr<wchar_t> versionStr;
     HRESULT hr = wxGetAvailableCoreWebView2BrowserVersionString(NULL, &versionStr);
-    if (SUCCEEDED(hr))
+    if (SUCCEEDED(hr) && versionStr)
     {
-        if (versionStr)
-        {
-            CoTaskMemFree(versionStr);
-            return true;
-        }
+        ms_isInitialized = true;
+        return true;
     }
     else
         wxLogApiError("GetCoreWebView2BrowserVersionInfo", hr);
@@ -140,12 +139,12 @@ bool wxWebViewEdgeImpl::Initialize()
     return false;
 }
 
-void wxWebViewEdgeImpl::Uninitalize()
+void wxWebViewEdgeImpl::Uninitialize()
 {
-    if (ms_isAvailable == 1)
+    if (ms_isInitialized)
     {
         ms_loaderDll.Unload();
-        ms_isAvailable = -1;
+        ms_isInitialized = false;
     }
 }
 
@@ -161,12 +160,10 @@ HRESULT wxWebViewEdgeImpl::OnNavigationStarting(ICoreWebView2* WXUNUSED(sender),
 {
     m_isBusy = true;
     wxString evtURL;
-    LPWSTR uri;
+    wxCoTaskMemPtr<wchar_t> uri;
     if (SUCCEEDED(args->get_Uri(&uri)))
-    {
         evtURL = wxString(uri);
-        CoTaskMemFree(uri);
-    }
+
     wxWebViewEvent event(wxEVT_WEBVIEW_NAVIGATING, m_ctrl->GetId(), evtURL, wxString());
     event.SetEventObject(m_ctrl);
     m_ctrl->HandleWindowEvent(event);
@@ -245,13 +242,10 @@ HRESULT wxWebViewEdgeImpl::OnNavigationCompleted(ICoreWebView2* WXUNUSED(sender)
 
 HRESULT wxWebViewEdgeImpl::OnNewWindowRequested(ICoreWebView2* WXUNUSED(sender), ICoreWebView2NewWindowRequestedEventArgs* args)
 {
-    LPWSTR uri;
+    wxCoTaskMemPtr<wchar_t> uri;
     wxString evtURL;
     if (SUCCEEDED(args->get_Uri(&uri)))
-    {
         evtURL = wxString(uri);
-        CoTaskMemFree(uri);
-    }
     wxWebViewNavigationActionFlags navFlags = wxWEBVIEW_NAV_ACTION_OTHER;
 
     BOOL isUserInitiated;
@@ -324,6 +318,22 @@ HRESULT wxWebViewEdgeImpl::OnWebViewCreated(HRESULT result, ICoreWebView2Control
             this, &wxWebViewEdgeImpl::OnContentLoading).Get(),
         &m_contentLoadingToken);
 
+    if (m_pendingContextMenuEnabled != -1)
+    {
+        m_ctrl->EnableContextMenu(m_pendingContextMenuEnabled == 1);
+        m_pendingContextMenuEnabled = -1;
+    }
+
+    if (m_pendingAccessToDevToolsEnabled != -1)
+    {
+        m_ctrl->EnableAccessToDevTools(m_pendingAccessToDevToolsEnabled == 1);
+        m_pendingContextMenuEnabled = -1;
+    }
+
+    wxCOMPtr<ICoreWebView2Settings> settings(GetSettings());
+    if (settings)
+        settings->put_IsStatusBarEnabled(false);
+
     if (!m_pendingURL.empty())
     {
         m_ctrl->LoadURL(m_pendingURL);
@@ -335,6 +345,9 @@ HRESULT wxWebViewEdgeImpl::OnWebViewCreated(HRESULT result, ICoreWebView2Control
 
 ICoreWebView2Settings* wxWebViewEdgeImpl::GetSettings()
 {
+    if (!m_webView)
+        return NULL;
+
     ICoreWebView2Settings* settings;
     HRESULT hr = m_webView->get_Settings(&settings);
     if (FAILED(hr))
@@ -346,21 +359,9 @@ ICoreWebView2Settings* wxWebViewEdgeImpl::GetSettings()
     return settings;
 }
 
-bool wxWebViewEdge::IsAvailable()
-{
-    if (wxWebViewEdgeImpl::ms_isAvailable == -1)
-    {
-        if (!wxWebViewEdgeImpl::Initialize())
-            wxWebViewEdgeImpl::ms_isAvailable = 0;
-        else
-            wxWebViewEdgeImpl::ms_isAvailable = 1;
-    }
-
-    return wxWebViewEdgeImpl::ms_isAvailable == 1;
-}
-
 wxWebViewEdge::~wxWebViewEdge()
 {
+    Unbind(wxEVT_SHOW, &wxWebViewEdge::OnShow, this);
     delete m_impl;
 }
 
@@ -372,7 +373,7 @@ bool wxWebViewEdge::Create(wxWindow* parent,
     long style,
     const wxString& name)
 {
-    if (!IsAvailable())
+    if (!wxWebViewEdgeImpl::Initialize())
         return false;
 
     if (!wxControl::Create(parent, id, pos, size, style,
@@ -385,6 +386,7 @@ bool wxWebViewEdge::Create(wxWindow* parent,
     if (!m_impl->Create())
         return false;
     Bind(wxEVT_SIZE, &wxWebViewEdge::OnSize, this);
+    Bind(wxEVT_SHOW, &wxWebViewEdge::OnShow, this);
 
     LoadURL(url);
     return true;
@@ -393,6 +395,13 @@ bool wxWebViewEdge::Create(wxWindow* parent,
 void wxWebViewEdge::OnSize(wxSizeEvent& event)
 {
     m_impl->UpdateBounds();
+    event.Skip();
+}
+
+void wxWebViewEdge::OnShow(wxShowEvent& event)
+{
+    if (m_impl->m_webView)
+        m_impl->m_webViewController->put_IsVisible(event.IsShown());
     event.Skip();
 }
 
@@ -519,26 +528,18 @@ bool wxWebViewEdge::IsBusy() const
 
 wxString wxWebViewEdge::GetCurrentURL() const
 {
-    LPWSTR uri;
+    wxCoTaskMemPtr<wchar_t> uri;
     if (m_impl->m_webView && SUCCEEDED(m_impl->m_webView->get_Source(&uri)))
-    {
-        wxString uriStr(uri);
-        CoTaskMemFree(uri);
-        return uriStr;
-    }
+        return wxString(uri);
     else
         return wxString();
 }
 
 wxString wxWebViewEdge::GetCurrentTitle() const
 {
-    LPWSTR title;
+    wxCoTaskMemPtr<wchar_t> title;
     if (m_impl->m_webView && SUCCEEDED(m_impl->m_webView->get_DocumentTitle(&title)))
-    {
-        wxString titleStr(title);
-        CoTaskMemFree(title);
-        return titleStr;
-    }
+        return wxString(title);
     else
         return wxString();
 }
@@ -578,6 +579,13 @@ wxWebViewZoom wxWebViewEdge::GetZoom() const
     return wxWEBVIEW_ZOOM_TINY;
 }
 
+float wxWebViewEdge::GetZoomFactor() const
+{
+    double old_zoom_factor = 0.0;
+    m_impl->m_webViewController->get_ZoomFactor(&old_zoom_factor);
+    return old_zoom_factor;
+}
+
 void wxWebViewEdge::SetZoom(wxWebViewZoom zoom)
 {
     double old_zoom_factor = 0.0;
@@ -603,7 +611,12 @@ void wxWebViewEdge::SetZoom(wxWebViewZoom zoom)
     default:
         break;
     }
-    m_impl->m_webViewController->put_ZoomFactor(zoom_factor);
+    SetZoomFactor(zoom_factor);
+}
+
+void wxWebViewEdge::SetZoomFactor(float zoom)
+{
+    m_impl->m_webViewController->put_ZoomFactor(zoom);
 }
 
 bool wxWebViewEdge::CanCut() const
@@ -713,6 +726,8 @@ void wxWebViewEdge::EnableContextMenu(bool enable)
     wxCOMPtr<ICoreWebView2Settings> settings(m_impl->GetSettings());
     if (settings)
         settings->put_AreDefaultContextMenusEnabled(enable);
+    else
+        m_impl->m_pendingContextMenuEnabled = enable ? 1 : 0;
 }
 
 bool wxWebViewEdge::IsContextMenuEnabled() const
@@ -734,6 +749,8 @@ void wxWebViewEdge::EnableAccessToDevTools(bool enable)
     wxCOMPtr<ICoreWebView2Settings> settings(m_impl->GetSettings());
     if (settings)
         settings->put_AreDevToolsEnabled(enable);
+    else
+        m_impl->m_pendingAccessToDevToolsEnabled = enable ? 1 : 0;
 }
 
 bool wxWebViewEdge::IsAccessToDevToolsEnabled() const
@@ -849,6 +866,14 @@ void wxWebViewEdge::DoSetPage(const wxString& html, const wxString& WXUNUSED(bas
         m_impl->m_webView->NavigateToString(html.wc_str());
 }
 
+// wxWebViewFactoryEdge
+
+bool wxWebViewFactoryEdge::IsAvailable()
+{
+    return wxWebViewEdgeImpl::Initialize();
+}
+
+
 // ----------------------------------------------------------------------------
 // Module ensuring all global/singleton objects are destroyed on shutdown.
 // ----------------------------------------------------------------------------
@@ -867,7 +892,7 @@ public:
 
     virtual void OnExit() wxOVERRIDE
     {
-        wxWebViewEdgeImpl::Uninitalize();
+        wxWebViewEdgeImpl::Uninitialize();
     }
 
 private:

@@ -153,10 +153,6 @@ set(BASE_AND_GUI_OSX_COCOA_SRC
     src/osx/cocoa/power.mm
 )
 
-set(BASE_AND_GUI_OSX_IPHONE_SRC
-    src/osx/iphone/utils.mm
-)
-
 set(BASE_OSX_NOTWXMAC_SRC
     ${BASE_UNIX_AND_DARWIN_NOTWXMAC_SRC}
     ${BASE_COREFOUNDATION_SRC}
@@ -1285,6 +1281,7 @@ set(GTK_LOWLEVEL_SRC
     src/gtk/filectrl.cpp
     src/gtk/filehistory.cpp
     src/gtk/font.cpp
+    src/gtk/image_gtk.cpp
     src/gtk/sockgtk.cpp
     src/gtk/mimetype.cpp
     src/gtk/minifram.cpp
@@ -2569,11 +2566,12 @@ set(OSX_IPHONE_SRC
     src/osx/sound_osx.cpp
     src/osx/core/sound.cpp
     src/osx/iphone/statbmp.mm
+    src/osx/iphone/menuitem.mm
+    src/osx/iphone/menu.mm
 )
 
 set(OSX_IPHONE_HDR
     wx/osx/iphone/chkconf.h
-    wx/osx/iphone/evtloop.h
     wx/osx/iphone/private.h
     wx/generic/region.h
     wx/osx/sound.h
@@ -2587,7 +2585,6 @@ set(UNIV_THEMES_SRC
 )
 
 set(UNIV_SRC
-    ${UNIV_PLATFORM_SRC}
     src/generic/accel.cpp
     src/generic/clrpickerg.cpp
     src/generic/collpaneg.cpp
@@ -2642,7 +2639,6 @@ set(UNIV_SRC
 )
 
 set(UNIV_HDR
-    ${UNIV_PLATFORM_HDR}
     wx/generic/accel.h
     wx/generic/clrpickerg.h
     wx/generic/collpaneg.h
@@ -2937,7 +2933,6 @@ set(XRC_SRC
     src/xrc/xh_unkwn.cpp
     src/xrc/xh_wizrd.cpp
     src/xrc/xmlres.cpp
-    src/xrc/xmladv.cpp
     src/xrc/xmlrsall.cpp
     src/xrc/xh_dataview.cpp
 )
@@ -3042,15 +3037,22 @@ set(OPENGL_MSW_HDR
 set(OPENGL_GTK_SRC
     src/gtk/glcanvas.cpp
     src/unix/glx11.cpp
+    src/unix/glegl.cpp
 )
 
 set(OPENGL_GTK_HDR
     wx/gtk/glcanvas.h
     wx/unix/glx11.h
+    wx/unix/glegl.h
 )
 
-set(OPENGL_OSX_SHARED_SRC
+set(OPENGL_OSX_COCOA_SRC
     src/osx/cocoa/glcanvas.mm
+    src/osx/glcanvas_osx.cpp
+)
+
+set(OPENGL_OSX_IPHONE_SRC
+    src/osx/iphone/glcanvas.mm
     src/osx/glcanvas_osx.cpp
 )
 

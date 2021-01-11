@@ -1126,12 +1126,19 @@
 // depends on it)
 #define wxUSE_INFOBAR       1
 
-// Use wxMenu, wxMenuBar, wxMenuItem.
+// Use wxMenu, wxMenuItem.
 //
 // Default is 1.
 //
 // Recommended setting: 1 (can't be disabled under MSW)
 #define wxUSE_MENUS         1
+
+// Use wxMenuBar.
+//
+// Default is 1.
+//
+// Recommended setting: 1 (can't be disabled under MSW)
+#define wxUSE_MENUBAR       1
 
 // Use wxNotificationMessage.
 //
@@ -1375,6 +1382,14 @@
 // Recommended setting: 1 if you intend to use OpenGL, can be safely set to 0
 // otherwise.
 #define wxUSE_GLCANVAS       1
+
+// Setting wxUSE_GLCANVAS_EGL to 1 enables OpenGL EGL backend. This will be
+// automatically enabled if EGL support is detected.  EGL support is only
+// available under Unix platforms.
+//
+// Default is 0.
+//
+#define wxUSE_GLCANVAS_EGL   0
 
 // wxRichTextCtrl allows editing of styled text.
 //

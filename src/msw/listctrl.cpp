@@ -19,9 +19,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_LISTCTRL
 
@@ -48,7 +45,7 @@
 // Currently gcc doesn't define NMLVFINDITEM, and DMC only defines
 // it by its old name NM_FINDTIEM.
 //
-#if defined(__VISUALC__) || defined(__BORLANDC__) || defined(NMLVFINDITEM)
+#if defined(__VISUALC__) || defined(NMLVFINDITEM)
     #define HAVE_NMLVFINDITEM 1
 #elif defined(NM_FINDITEM)
     #define HAVE_NMLVFINDITEM 1
@@ -429,17 +426,6 @@ void wxListCtrl::MSWUpdateFontOnDPIChange(const wxSize& newDPI)
 {
     wxListCtrlBase::MSWUpdateFontOnDPIChange(newDPI);
 
-    for ( int i = 0; i < GetItemCount(); i++ )
-    {
-        wxMSWListItemData *data = MSWGetItemData(i);
-        if ( data && data->attr && data->attr->HasFont() )
-        {
-            wxFont f = data->attr->GetFont();
-            f.WXAdjustToPPI(newDPI);
-            SetItemFont(i, f);
-        }
-    }
-
     if ( m_headerCustomDraw && m_headerCustomDraw->m_attr.HasFont() )
     {
         wxItemAttr item(m_headerCustomDraw->m_attr);
@@ -799,7 +785,15 @@ bool wxListCtrl::SetColumnWidth(int col, int width)
     else if ( width == wxLIST_AUTOSIZE_USEHEADER)
         width = LVSCW_AUTOSIZE_USEHEADER;
 
-    return ListView_SetColumnWidth(GetHwnd(), col, width) != 0;
+    if ( !ListView_SetColumnWidth(GetHwnd(), col, width) )
+        return false;
+
+    // Failure to explicitly refresh the control with horizontal rules results
+    // in corrupted rules display.
+    if ( HasFlag(wxLC_HRULES) )
+        Refresh();
+
+    return true;
 }
 
 // ----------------------------------------------------------------------------
@@ -1014,13 +1008,6 @@ bool wxListCtrl::SetItem(wxListItem& info)
                 data->attr->AssignFrom(attrNew);
             else
                 data->attr = new wxItemAttr(attrNew);
-
-            if ( data->attr->HasFont() )
-            {
-                wxFont f = data->attr->GetFont();
-                f.WXAdjustToPPI(GetDPI());
-                data->attr->SetFont(f);
-            }
         }
     }
 
@@ -2470,74 +2457,78 @@ bool wxListCtrl::MSWOnNotify(int idCtrl, WXLPARAM lParam, WXLPARAM *result)
             case LVN_ITEMCHANGED:
                 // we translate this catch all message into more interesting
                 // (and more easy to process) wxWidgets events
-
-                // first of all, we deal with the state change events only and
-                // only for valid items (item == -1 for the virtual list
-                // control)
-                if ( nmLV->uChanged & LVIF_STATE && iItem != -1 )
                 {
                     // temp vars for readability
                     const UINT stOld = nmLV->uOldState;
                     const UINT stNew = nmLV->uNewState;
 
-                    event.m_item.SetId(iItem);
-                    event.m_item.SetMask(wxLIST_MASK_TEXT |
-                                         wxLIST_MASK_IMAGE |
-                                         wxLIST_MASK_DATA);
-                    GetItem(event.m_item);
-
-                    // has the focus changed?
-                    if ( !(stOld & LVIS_FOCUSED) && (stNew & LVIS_FOCUSED) )
+                    // first of all, we deal with the state change events only and
+                    // only for valid items (item == -1 for the virtual list
+                    // control)
+                    if ( nmLV->uChanged & LVIF_STATE &&
+                         (iItem != -1 || (stNew & LVIS_SELECTED) != (stOld & LVIS_SELECTED)))
                     {
-                        eventType = wxEVT_LIST_ITEM_FOCUSED;
-                        event.m_itemIndex = iItem;
-                    }
 
-                    if ( (stNew & LVIS_SELECTED) != (stOld & LVIS_SELECTED) )
-                    {
-                        if ( eventType != wxEVT_NULL )
+                        event.m_item.SetId(iItem);
+                        event.m_item.SetMask(wxLIST_MASK_TEXT |
+                                             wxLIST_MASK_IMAGE |
+                                             wxLIST_MASK_DATA);
+                        if (iItem != -1)
+                            GetItem(event.m_item);
+
+                        // has the focus changed?
+                        if ( !(stOld & LVIS_FOCUSED) && (stNew & LVIS_FOCUSED) )
                         {
-                            // focus and selection have both changed: send the
-                            // focus event from here and the selection one
-                            // below
-                            event.SetEventType(eventType);
-                            (void)HandleWindowEvent(event);
-                        }
-                        else // no focus event to send
-                        {
-                            // then need to set m_itemIndex as it wasn't done
-                            // above
+                            eventType = wxEVT_LIST_ITEM_FOCUSED;
                             event.m_itemIndex = iItem;
                         }
 
-                        eventType = stNew & LVIS_SELECTED
-                                        ? wxEVT_LIST_ITEM_SELECTED
-                                        : wxEVT_LIST_ITEM_DESELECTED;
-                    }
+                        if ( (stNew & LVIS_SELECTED) != (stOld & LVIS_SELECTED) )
+                        {
+                            if ( eventType != wxEVT_NULL )
+                            {
+                                // focus and selection have both changed: send the
+                                // focus event from here and the selection one
+                                // below
+                                event.SetEventType(eventType);
+                                (void)HandleWindowEvent(event);
+                            }
+                            else // no focus event to send
+                            {
+                                // then need to set m_itemIndex as it wasn't done
+                                // above
+                                event.m_itemIndex = iItem;
+                            }
 
-                    if ( (stNew & LVIS_STATEIMAGEMASK) != (stOld & LVIS_STATEIMAGEMASK) )
-                    {
-                        if ( stOld == INDEXTOSTATEIMAGEMASK(0) )
-                        {
-                            // item does not yet have a state
-                            // occurs when checkboxes are enabled and when a new item is added
-                            eventType = wxEVT_NULL;
-                        }
-                        else if ( stNew == INDEXTOSTATEIMAGEMASK(1) )
-                        {
-                            eventType = wxEVT_LIST_ITEM_UNCHECKED;
-                        }
-                        else if ( stNew == INDEXTOSTATEIMAGEMASK(2) )
-                        {
-                            eventType = wxEVT_LIST_ITEM_CHECKED;
-                        }
-                        else
-                        {
-                            eventType = wxEVT_NULL;
-                            wxLogDebug(wxS("Unknown LVIS_STATEIMAGE state: %u"), stNew);
+                            eventType = stNew & LVIS_SELECTED
+                                            ? wxEVT_LIST_ITEM_SELECTED
+                                            : wxEVT_LIST_ITEM_DESELECTED;
                         }
 
-                        event.m_itemIndex = iItem;
+                        if ( (stNew & LVIS_STATEIMAGEMASK) != (stOld & LVIS_STATEIMAGEMASK) )
+                        {
+                            if ( stOld == INDEXTOSTATEIMAGEMASK(0) )
+                            {
+                                // item does not yet have a state
+                                // occurs when checkboxes are enabled and when a new item is added
+                                eventType = wxEVT_NULL;
+                            }
+                            else if ( stNew == INDEXTOSTATEIMAGEMASK(1) )
+                            {
+                                eventType = wxEVT_LIST_ITEM_UNCHECKED;
+                            }
+                            else if ( stNew == INDEXTOSTATEIMAGEMASK(2) )
+                            {
+                                eventType = wxEVT_LIST_ITEM_CHECKED;
+                            }
+                            else
+                            {
+                                eventType = wxEVT_NULL;
+                                wxLogDebug(wxS("Unknown LVIS_STATEIMAGE state: %u"), stNew);
+                            }
+
+                            event.m_itemIndex = iItem;
+                        }
                     }
                 }
 
@@ -3178,6 +3169,7 @@ static WXLPARAM HandleItemPrepaint(wxListCtrl *listctrl,
     if ( attr->HasFont() )
     {
         wxFont font = attr->GetFont();
+        font.WXAdjustToPPI(listctrl->GetDPI());
         if ( font.GetEncoding() != wxFONTENCODING_SYSTEM )
         {
             // the standard control ignores the font encoding/charset, at least
@@ -3286,9 +3278,6 @@ void wxListCtrl::OnPaint(wxPaintEvent& event)
     const long top = GetTopItem();
     const long bottom = wxMin(top + countPerPage, itemCount - 1);
 
-    wxRect clipRect;
-    dc.GetClippingBox(clipRect);
-
     if (drawHRules)
     {
         wxRect itemRect;
@@ -3297,22 +3286,8 @@ void wxListCtrl::OnPaint(wxPaintEvent& event)
             if (GetItemRect(i, itemRect))
             {
                 const int cy = itemRect.GetBottom();
-                dc.DrawLine(clipRect.x, cy, clipRect.GetRight() + 1, cy);
+                dc.DrawLine(0, cy, clientSize.x, cy);
             }
-        }
-
-        /*
-            The drawing can be clipped horizontally to the rightmost column.
-            This happens when an item is added (and visible) and results in a
-            horizontal rule being clipped instead of drawn across the entire
-            list control. In that case we request for the part to the right of
-            the rightmost column to be drawn as well.
-        */
-        if ( clipRect.GetRight() != clientSize.x - 1 && clipRect.width )
-        {
-            RefreshRect(wxRect(clipRect.GetRight(), clipRect.y,
-                               clientSize.x - clipRect.width, clipRect.height),
-                        false /* don't erase background */);
         }
     }
 

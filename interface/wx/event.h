@@ -1574,7 +1574,7 @@ public:
         Under GTK, the raw key code is the @c keyval field of the corresponding
         GDK event.
 
-        Under OS X, the raw key code is the @c keyCode field of the
+        Under macOS, the raw key code is the @c keyCode field of the
         corresponding NSEvent.
 
         @note Currently the raw key codes are not supported by all ports, use
@@ -1594,7 +1594,7 @@ public:
         Under GTK, the raw flags contain the @c hardware_keycode field of the
         corresponding GDK event.
 
-        Under OS X, the raw flags contain the modifiers state.
+        Under macOS, the raw flags contain the modifiers state.
 
         @note Currently the raw key flags are not supported by all ports, use
               @ifdef_ wxHAS_RAW_KEY_CODES to determine if this feature is available.
@@ -2375,6 +2375,26 @@ public:
     bool GetEnabled() const;
 
     /**
+        Returns @true if the UI element can be checked.
+
+        For the event handlers that can be used for multiple items, not all of
+        which can be checked, this method can be useful to determine whether
+        to call Check() on the event object or not, i.e. the main use case for
+        this method is:
+        @code
+        void MyWindow::OnUpdateUI(wxUpdateUIEvent& event)
+        {
+            ....
+            if ( event.IsCheckable() )
+                event.Check(...some condition...);
+        }
+        @endcode
+
+        @since 3.1.5
+    */
+    bool IsCheckable() const;
+
+    /**
         Static function returning a value specifying how wxWidgets will send update
         events: to all windows, or only to those which specify that they will process
         the events.
@@ -2784,7 +2804,7 @@ public:
         (or zoom in), a negative value means we should shrink (or zoom out).
 
         This method is only valid to call for @c wxEVT_MAGNIFY events which are
-        currently only generated under OS X.
+        currently only generated under macOS.
 
         @see Magnify()
 
@@ -2877,7 +2897,7 @@ public:
     /**
         Returns @true if the event is a magnify (i.e.\ pinch to zoom) event.
 
-        Such events are currently generated only under OS X.
+        Such events are currently generated only under macOS.
 
         @see GetMagnification()
 

@@ -14,9 +14,6 @@
 
 #if wxUSE_TEXTCTRL
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -24,7 +21,6 @@
 #endif // WX_PRECOMP
 
 #include "wx/scopedptr.h"
-#include "wx/scopeguard.h"
 #include "wx/uiaction.h"
 
 #if wxUSE_CLIPBOARD
@@ -290,8 +286,7 @@ void TextCtrlTestCase::StreamInput()
 #ifndef __WXOSX__
     {
         // Ensure we use decimal point and not a comma.
-        char * const locOld = setlocale(LC_NUMERIC, "C");
-        wxON_BLOCK_EXIT2( setlocale, (int)LC_NUMERIC, locOld );
+        LocaleSetter setCLocale("C");
 
         *m_text << "stringinput"
                 << 10
@@ -347,7 +342,7 @@ void TextCtrlTestCase::Redirector()
 void TextCtrlTestCase::HitTestSingleLine()
 {
 #ifdef __WXQT__
-	WARN("Does not work under WxQt");
+    WARN("Does not work under WxQt");
 #else
     m_text->ChangeValue("Hit me");
 
@@ -518,7 +513,7 @@ void TextCtrlTestCase::Style()
     CHECK( style.GetTextColour() == *wxRED );
     CHECK( style.GetBackgroundColour() == *wxWHITE );
 #else
-	WARN("Does not work under WxQt or OSX");
+    WARN("Does not work under WxQt or OSX");
 #endif
 }
 
@@ -1432,6 +1427,37 @@ TEST_CASE("wxTextCtrl::EventsOnCreate", "[wxTextCtrl][event]")
     // in TextEntryTestCase::TextChangeEvents()).
     text->SetValue("Bye");
     CHECK( updated.GetCount() == 1 );
+}
+
+TEST_CASE("wxTextCtrl::InitialCanUndo", "[wxTextCtrl][undo]")
+{
+    wxWindow* const parent = wxTheApp->GetTopWindow();
+
+    const long styles[] = { 0, wxTE_RICH, wxTE_RICH2 };
+
+    for ( size_t n = 0; n < WXSIZEOF(styles); n++ )
+    {
+        const long style = styles[n];
+
+#ifdef __MINGW32_TOOLCHAIN__
+        if ( style == wxTE_RICH2 )
+        {
+            // We can't call ITextDocument::Undo() in wxMSW code when using
+            // MinGW32, so this test would always fail with it.
+            WARN("Skipping test known to fail with MinGW-32.");
+        }
+        continue;
+#endif // __MINGW32_TOOLCHAIN__
+
+        INFO("wxTextCtrl with style " << style);
+
+        wxScopedPtr<wxTextCtrl> text(new wxTextCtrl(parent, wxID_ANY, "",
+                                                    wxDefaultPosition,
+                                                    wxDefaultSize,
+                                                    style));
+
+        CHECK( !text->CanUndo() );
+    }
 }
 
 #endif //wxUSE_TEXTCTRL

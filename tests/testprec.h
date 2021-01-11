@@ -24,8 +24,7 @@
 #endif
 
 // define wxHAVE_U_ESCAPE if the compiler supports \uxxxx character constants
-#if defined(__VISUALC__) || \
-    (defined(__GNUC__) && (__GNUC__ >= 3))
+#if defined(__VISUALC__) || defined(__GNUC__)
     #define wxHAVE_U_ESCAPE
 
     // and disable warning that using them results in with MSVC 8+
@@ -73,7 +72,7 @@ struct StringMaker<wchar_t>
         if ( wc < 0x7f )
             return std::string(static_cast<char>(wc), 1);
 
-        return wxString::Format("U+%06X", wc).ToStdString();
+        return wxString::Format(wxASCII_STR("U+%06X"), wc).ToStdString(wxConvLibc);
     }
 };
 

@@ -10,9 +10,6 @@
 
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_GRID
 
@@ -79,6 +76,47 @@ void wxGridCellRenderer::Draw(wxGrid& grid,
 
 #if wxUSE_DATETIME
 
+bool
+wxGridPrivate::TryGetValueAsDate(wxDateTime& result,
+                                 const DateParseParams& params,
+                                 const wxGrid& grid,
+                                 int row, int col)
+{
+    wxGridTableBase *table = grid.GetTable();
+
+    if ( table->CanGetValueAs(row, col, wxGRID_VALUE_DATETIME) )
+    {
+        void * tempval = table->GetValueAsCustom(row, col,wxGRID_VALUE_DATETIME);
+
+        if (tempval)
+        {
+            result = *((wxDateTime *)tempval);
+            delete (wxDateTime *)tempval;
+
+            return true;
+        }
+
+    }
+
+    const wxString text = table->GetValue(row, col);
+
+    wxString::const_iterator end;
+
+    if ( result.ParseFormat(text, params.format, &end) && end == text.end() )
+        return true;
+
+    // Check if we can fall back to free-form parsing, which notably allows us
+    // to parse strings such as "today" or "tomorrow" which would be never
+    // accepted by ParseFormat().
+    if ( params.fallbackParseDate &&
+            result.ParseDate(text, &end) && end == text.end() )
+        return true;
+
+    return false;
+}
+
+using namespace wxGridPrivate;
+
 // Enables a grid cell to display a formatted date
 
 wxGridCellDateRenderer::wxGridCellDateRenderer(const wxString& outformat)
@@ -101,41 +139,23 @@ wxGridCellRenderer *wxGridCellDateRenderer::Clone() const
 
 wxString wxGridCellDateRenderer::GetString(const wxGrid& grid, int row, int col)
 {
-    wxGridTableBase *table = grid.GetTable();
-
-    bool hasDatetime = false;
-    wxDateTime val;
     wxString text;
-    if ( table->CanGetValueAs(row, col, wxGRID_VALUE_DATETIME) )
-    {
-        void * tempval = table->GetValueAsCustom(row, col,wxGRID_VALUE_DATETIME);
 
-        if (tempval)
-        {
-            val = *((wxDateTime *)tempval);
-            hasDatetime = true;
-            delete (wxDateTime *)tempval;
-        }
+    DateParseParams params;
+    GetDateParseParams(params);
 
-    }
-
-    if (!hasDatetime )
-    {
-        text = table->GetValue(row, col);
-        hasDatetime = Parse(text, val);
-    }
-
-    if ( hasDatetime )
+    wxDateTime val;
+    if ( TryGetValueAsDate(val, params, grid, row, col) )
         text = val.Format(m_oformat, m_tz );
 
     // If we failed to parse string just show what we where given?
     return text;
 }
 
-bool wxGridCellDateRenderer::Parse(const wxString& text, wxDateTime& result)
+void
+wxGridCellDateRenderer::GetDateParseParams(DateParseParams& params) const
 {
-    wxString::const_iterator end;
-    return result.ParseDate(text, &end) && end == text.end();
+    params = DateParseParams::WithFallback(m_oformat);
 }
 
 void wxGridCellDateRenderer::Draw(wxGrid& grid,
@@ -165,6 +185,24 @@ wxSize wxGridCellDateRenderer::GetBestSize(wxGrid& grid,
     return DoGetBestSize(attr, dc, GetString(grid, row, col));
 }
 
+wxSize wxGridCellDateRenderer::GetMaxBestSize(wxGrid& WXUNUSED(grid),
+                                              wxGridCellAttr& attr,
+                                              wxDC& dc)
+{
+    wxSize size;
+
+    // Try to produce the longest string in the current format: as we don't
+    // know which month is the longest, we need to try all of them.
+    for ( int m = wxDateTime::Jan; m <= wxDateTime::Dec; ++m )
+    {
+        const wxDateTime d(28, static_cast<wxDateTime::Month>(m), 9999);
+
+        size.IncTo(DoGetBestSize(attr, dc, d.Format(m_oformat, m_tz)));
+    }
+
+    return size;
+}
+
 void wxGridCellDateRenderer::SetParameters(const wxString& params)
 {
     if (!params.empty())
@@ -177,7 +215,6 @@ void wxGridCellDateRenderer::SetParameters(const wxString& params)
 wxGridCellDateTimeRenderer::wxGridCellDateTimeRenderer(const wxString& outformat, const wxString& informat)
     : wxGridCellDateRenderer(outformat)
     , m_iformat(informat)
-    , m_dateDef(wxDefaultDateTime)
 {
 }
 
@@ -186,13 +223,45 @@ wxGridCellRenderer *wxGridCellDateTimeRenderer::Clone() const
     return new wxGridCellDateTimeRenderer(*this);
 }
 
-bool wxGridCellDateTimeRenderer::Parse(const wxString& text, wxDateTime& result)
+void
+wxGridCellDateTimeRenderer::GetDateParseParams(DateParseParams& params) const
 {
-    const char * const end = result.ParseFormat(text, m_iformat, m_dateDef);
-    return end && !*end;
+    params = DateParseParams::WithoutFallback(m_iformat);
 }
 
 #endif // wxUSE_DATETIME
+
+// ----------------------------------------------------------------------------
+// wxGridCellChoiceRenderer
+// ----------------------------------------------------------------------------
+
+wxSize wxGridCellChoiceRenderer::GetMaxBestSize(wxGrid& WXUNUSED(grid),
+                                                wxGridCellAttr& attr,
+                                                wxDC& dc)
+{
+    wxSize size;
+
+    for ( size_t n = 0; n < m_choices.size(); ++n )
+    {
+        size.IncTo(DoGetBestSize(attr, dc, m_choices[n]));
+    }
+
+    return size;
+}
+
+void wxGridCellChoiceRenderer::SetParameters(const wxString& params)
+{
+    m_choices.clear();
+
+    if ( params.empty() )
+        return;
+
+    wxStringTokenizer tk(params, wxT(','));
+    while ( tk.HasMoreTokens() )
+    {
+        m_choices.Add(tk.GetNextToken());
+    }
+}
 
 // ----------------------------------------------------------------------------
 // wxGridCellEnumRenderer
@@ -259,24 +328,6 @@ wxSize wxGridCellEnumRenderer::GetBestSize(wxGrid& grid,
 {
     return DoGetBestSize(attr, dc, GetString(grid, row, col));
 }
-
-void wxGridCellEnumRenderer::SetParameters(const wxString& params)
-{
-    if ( !params )
-    {
-        // what can we do?
-        return;
-    }
-
-    m_choices.Empty();
-
-    wxStringTokenizer tk(params, wxT(','));
-    while ( tk.HasMoreTokens() )
-    {
-        m_choices.Add(tk.GetNextToken());
-    }
-}
-
 
 // ----------------------------------------------------------------------------
 // wxGridCellAutoWrapStringRenderer
@@ -495,10 +546,16 @@ wxGridCellAutoWrapStringRenderer::GetBestWidth(wxGrid& grid,
 {
     const int lineHeight = dc.GetCharHeight();
 
-    // Maximal number of lines that fully fit but at least 1.
-    const size_t maxLines = height - AUTOWRAP_Y_MARGIN < lineHeight
-                                ? 1
-                                : (height - AUTOWRAP_Y_MARGIN)/lineHeight;
+    // Base the maximal number of lines either on how many fit or how many
+    // (new)lines the cell's text contains, whichever results in the most lines.
+    //
+    // It's important to take the newlines into account as GetTextLines() splits
+    // based on them and the number of lines returned can never drop below that,
+    // resulting in the while loop below never exiting if there are already more
+    // lines in the text than can fit in the available height.
+    const size_t maxLines = wxMax(
+                              (height - AUTOWRAP_Y_MARGIN)/lineHeight,
+                              1 + grid.GetCellValue(row, col).Freq(wxS('\n')));
 
     // Increase width until all the text fits.
     //
@@ -557,18 +614,8 @@ wxSize wxGridCellStringRenderer::DoGetBestSize(const wxGridCellAttr& attr,
                                                wxDC& dc,
                                                const wxString& text)
 {
-    wxCoord x = 0, y = 0, max_x = 0;
     dc.SetFont(attr.GetFont());
-    wxStringTokenizer tk(text, wxT('\n'));
-    while ( tk.HasMoreTokens() )
-    {
-        dc.GetTextExtent(tk.GetNextToken(), &x, &y);
-        max_x = wxMax(max_x, x);
-    }
-
-    y *= 1 + text.Freq(wxT('\n')); // multiply by the number of lines.
-
-    return wxSize(max_x, y);
+    return dc.GetMultiLineTextExtent(text);
 }
 
 wxSize wxGridCellStringRenderer::GetBestSize(wxGrid& grid,
@@ -724,6 +771,34 @@ wxSize wxGridCellNumberRenderer::GetBestSize(wxGrid& grid,
                                              int row, int col)
 {
     return DoGetBestSize(attr, dc, GetString(grid, row, col));
+}
+
+wxSize wxGridCellNumberRenderer::GetMaxBestSize(wxGrid& WXUNUSED(grid),
+                                                wxGridCellAttr& attr,
+                                                wxDC& dc)
+{
+    // In theory, it's possible that there is a value in min..max range which
+    // is longer than both min and max, e.g. we could conceivably have "88" be
+    // wider than both "87" and "91" with some fonts, but it seems something
+    // too exotic to worry about in practice.
+    wxSize size = DoGetBestSize(attr, dc, wxString::Format("%ld", m_minValue));
+    size.IncTo(DoGetBestSize(attr, dc, wxString::Format("%ld", m_maxValue)));
+
+    return size;
+}
+
+void wxGridCellNumberRenderer::SetParameters(const wxString& params)
+{
+    if ( params.empty() )
+        return;
+
+    wxString maxStr;
+    const wxString minStr = params.BeforeFirst(',', &maxStr);
+
+    if ( !minStr.ToLong(&m_minValue) || !maxStr.ToLong(&m_maxValue) )
+    {
+        wxLogDebug("Invalid wxGridCellNumberRenderer parameters \"%s\"", params);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -922,10 +997,17 @@ void wxGridCellFloatRenderer::SetParameters(const wxString& params)
 // ----------------------------------------------------------------------------
 
 wxSize wxGridCellBoolRenderer::GetBestSize(wxGrid& grid,
-                                           wxGridCellAttr& WXUNUSED(attr),
-                                           wxDC& WXUNUSED(dc),
+                                           wxGridCellAttr& attr,
+                                           wxDC& dc,
                                            int WXUNUSED(row),
                                            int WXUNUSED(col))
+{
+    return GetMaxBestSize(grid, attr, dc);
+}
+
+wxSize wxGridCellBoolRenderer::GetMaxBestSize(wxGrid& grid,
+                                              wxGridCellAttr& WXUNUSED(attr),
+                                              wxDC& WXUNUSED(dc))
 {
     static wxPrivate::DpiDependentValue<wxSize> s_sizeCheckMark;
 

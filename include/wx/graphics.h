@@ -104,7 +104,7 @@ class WXDLLIMPEXP_FWD_CORE wxGraphicsBitmap;
 /*
  * notes about the graphics context apis
  *
- * angles : are measured in radians, 0.0 being in direction of positiv x axis, PI/2 being
+ * angles : are measured in radians, 0.0 being in direction of positive x axis, PI/2 being
  * in direction of positive y axis.
  */
 
@@ -218,7 +218,7 @@ public:
     virtual void Set(wxDouble a=1.0, wxDouble b=0.0, wxDouble c=0.0, wxDouble d=1.0,
         wxDouble tx=0.0, wxDouble ty=0.0);
 
-    // gets the component valuess of the matrix
+    // gets the component values of the matrix
     virtual void Get(wxDouble* a=NULL, wxDouble* b=NULL,  wxDouble* c=NULL,
                      wxDouble* d=NULL, wxDouble* tx=NULL, wxDouble* ty=NULL) const;
 
@@ -274,12 +274,18 @@ extern WXDLLIMPEXP_DATA_CORE(wxGraphicsMatrix) wxNullGraphicsMatrix;
 // and how they are spread out in a gradient
 // ----------------------------------------------------------------------------
 
+// gcc 9 gives a nonsensical warning about implicitly generated move ctor not
+// throwing but not being noexcept, suppress it.
+#if wxCHECK_GCC_VERSION(9, 1) && !wxCHECK_GCC_VERSION(10, 0)
+wxGCC_WARNING_SUPPRESS(noexcept)
+#endif
+
 // Describes a single gradient stop.
 class wxGraphicsGradientStop
 {
 public:
     wxGraphicsGradientStop(wxColour col = wxTransparentColour,
-                           float pos = 0.)
+                           float pos = 0.0f)
         : m_col(col),
           m_pos(pos)
     {
@@ -305,6 +311,10 @@ private:
     // Its starting position: 0 is the beginning and 1 is the end.
     float m_pos;
 };
+
+#if wxCHECK_GCC_VERSION(9, 1) && !wxCHECK_GCC_VERSION(10, 0)
+wxGCC_WARNING_RESTORE(noexcept)
+#endif
 
 // A collection of gradient stops ordered by their positions (from lowest to
 // highest). The first stop (index 0, position 0.0) is always the starting

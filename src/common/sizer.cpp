@@ -12,9 +12,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #include "wx/sizer.h"
 #include "wx/private/flagscheck.h"
@@ -35,6 +32,7 @@
 #include "wx/vector.h"
 #include "wx/listimpl.cpp"
 #include "wx/private/window.h"
+#include "wx/scopedptr.h"
 
 
 //---------------------------------------------------------------------------
@@ -111,7 +109,7 @@ float wxSizerFlags::DoGetDefaultBorderInPx()
     if ( s_defaultBorderInPx.HasChanged(win) )
     {
         s_defaultBorderInPx.SetAtNewDPI(
-            (float)(5 * (win ? win->GetContentScaleFactor() : 1)));
+            (float)(5 * (win ? win->GetDPIScaleFactor() : 1.0)));
     }
     return s_defaultBorderInPx.Get();
 }
@@ -235,7 +233,7 @@ wxSizerItem::wxSizerItem(wxSizer *sizer,
              m_border(border),
              m_flag(flag),
              m_id(wxID_NONE),
-             m_ratio(0.0),
+             m_ratio(0),
              m_userData(userData)
 {
     ASSERT_VALID_SIZER_FLAGS( m_flag );
@@ -423,10 +421,10 @@ bool wxSizerItem::InformFirstDirection(int direction, int size, int availableOth
         // the owned window (happens automatically).
         if( (m_flag & wxSHAPED) && (m_flag & wxEXPAND) && direction )
         {
-            if( !wxIsNullDouble(m_ratio) )
+            if ( m_ratio != 0 )
             {
                 wxCHECK_MSG( m_proportion==0, false, wxT("Shaped item, non-zero proportion in wxSizerItem::InformFirstDirection()") );
-                if( direction==wxHORIZONTAL && !wxIsNullDouble(m_ratio) )
+                if ( direction == wxHORIZONTAL )
                 {
                     // Clip size so that we don't take too much
                     if( availableOtherDir>=0 && int(size/m_ratio)-m_minSize.y>availableOtherDir )
@@ -456,7 +454,7 @@ wxSize wxSizerItem::CalcMin()
 
         // if we have to preserve aspect ratio _AND_ this is
         // the first-time calculation, consider ret to be initial size
-        if ( (m_flag & wxSHAPED) && wxIsNullDouble(m_ratio) )
+        if ( (m_flag & wxSHAPED) && m_ratio == 0 )
             SetRatio(m_minSize);
     }
     else if ( IsWindow() )
@@ -676,7 +674,35 @@ wxSizer::~wxSizer()
 
 wxSizerItem* wxSizer::DoInsert( size_t index, wxSizerItem *item )
 {
-    m_children.Insert( index, item );
+    // The helper class that solves two problems when
+    // wxWindowBase::SetContainingSizer() throws:
+    // 1. Avoid leaking memory using the scoped pointer to the sizer item.
+    // 2. Disassociate the window from the sizer item to not reset the
+    //    containing sizer for the window in the items destructor.
+    class ContainingSizerGuard
+    {
+    public:
+        explicit ContainingSizerGuard( wxSizerItem *item )
+            : m_item(item)
+        {
+        }
+
+        ~ContainingSizerGuard()
+        {
+            if ( m_item )
+                m_item->DetachWindow();
+        }
+
+        wxSizerItem* Release()
+        {
+            return m_item.release();
+        }
+
+    private:
+        wxScopedPtr<wxSizerItem> m_item;
+    };
+
+    ContainingSizerGuard guard( item );
 
     if ( item->GetWindow() )
         item->GetWindow()->SetContainingSizer( this );
@@ -684,7 +710,9 @@ wxSizerItem* wxSizer::DoInsert( size_t index, wxSizerItem *item )
     if ( item->GetSizer() )
         item->GetSizer()->SetContainingWindow( m_containingWindow );
 
-    return item;
+    m_children.Insert( index, item );
+
+    return guard.Release();
 }
 
 void wxSizer::SetContainingWindow(wxWindow *win)
@@ -869,7 +897,7 @@ bool wxSizer::Replace( wxSizer *oldsz, wxSizer *newsz, bool recursive )
 bool wxSizer::Replace( size_t old, wxSizerItem *newitem )
 {
     wxCHECK_MSG( old < m_children.GetCount(), false, wxT("Replace index is out of range") );
-    wxASSERT_MSG( newitem, wxT("Replacing with NULL item") );
+    wxCHECK_MSG( newitem, false, wxT("Replacing with NULL item") );
 
     wxSizerItemList::compatibility_iterator node = m_children.Item( old );
 
@@ -878,10 +906,13 @@ bool wxSizer::Replace( size_t old, wxSizerItem *newitem )
     wxSizerItem *item = node->GetData();
     node->SetData(newitem);
 
-    if (item->IsWindow() && item->GetWindow())
-        item->GetWindow()->SetContainingSizer(NULL);
+    if (wxWindow* const w = item->GetWindow())
+        w->SetContainingSizer(NULL);
 
     delete item;
+
+    if (wxWindow* const w = newitem->GetWindow())
+        w->SetContainingSizer(this);
 
     return true;
 }
@@ -1449,6 +1480,9 @@ wxGridSizer::wxGridSizer( int rows, int cols, const wxSize& gap )
 
 wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
 {
+    // Ensure that the item will be deleted in case of exception.
+    wxScopedPtr<wxSizerItem> scopedItem( item );
+
     // if only the number of columns or the number of rows is specified for a
     // sizer, arbitrarily many items can be added to it but if both of them are
     // fixed, then the sizer can't have more than that many items -- check for
@@ -1489,7 +1523,7 @@ wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
         );
     }
 
-    return wxSizer::DoInsert(index, item);
+    return wxSizer::DoInsert( index, scopedItem.release() );
 }
 
 int wxGridSizer::CalcRowsCols(int& nrows, int& ncols) const
@@ -2539,7 +2573,7 @@ wxSize wxBoxSizer::CalcMin()
     // part, to respect the children proportion. To satisfy the latter
     // condition we must find the greatest min-size-to-proportion ratio for all
     // elements with non-zero proportion.
-    float maxMinSizeToProp = 0.;
+    float maxMinSizeToProp = 0;
     for ( wxSizerItemList::const_iterator i = m_children.begin();
           i != m_children.end();
           ++i )

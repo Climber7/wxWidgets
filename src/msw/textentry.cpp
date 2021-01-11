@@ -18,9 +18,6 @@
 // for compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/arrstr.h"
@@ -37,6 +34,7 @@
 
 #include "wx/msw/private.h"
 #include "wx/msw/private/winstyle.h"
+#include "wx/msw/private/cotaskmemptr.h"
 
 #if wxUSE_UXTHEME
     #include "wx/msw/uxtheme.h"
@@ -207,13 +205,13 @@ public:
 
             const wxWX2WCbuf wcbuf = s.wc_str();
             const size_t size = (wcslen(wcbuf) + 1)*sizeof(wchar_t);
-            void *olestr = CoTaskMemAlloc(size);
+            wxCoTaskMemPtr<wchar_t> olestr(size);
+
             if ( !olestr )
                 return E_OUTOFMEMORY;
 
             memcpy(olestr, wcbuf, size);
-
-            *rgelt++ = static_cast<LPOLESTR>(olestr);
+            *rgelt++ = olestr.release();
 
             ++(*pceltFetched);
         }

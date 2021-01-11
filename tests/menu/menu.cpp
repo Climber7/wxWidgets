@@ -12,17 +12,15 @@
 
 #include "testprec.h"
 
-#if wxUSE_MENUS
+#if wxUSE_MENUBAR
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/wx.h"
 #endif // WX_PRECOMP
 
 #include "wx/menu.h"
+#include "wx/scopedptr.h"
 #include "wx/translation.h"
 #include "wx/uiaction.h"
 
@@ -584,10 +582,6 @@ void MenuTestCase::Events()
     // Invoke the accelerator.
     m_frame->Show();
     m_frame->SetFocus();
-#ifdef __WXGTK__
-    // Without this, test fails when run with other tests under Xvfb.
-    m_frame->Raise();
-#endif
     wxYield();
 
     wxUIActionSimulator sim;
@@ -631,7 +625,9 @@ namespace
 
 void VerifyAccelAssigned( wxString labelText, int keycode )
 {
-    wxAcceleratorEntry* entry = wxAcceleratorEntry::Create( labelText );
+    const wxScopedPtr<wxAcceleratorEntry> entry(
+        wxAcceleratorEntry::Create( labelText )
+    );
 
     CHECK( entry );
     CHECK( entry->GetKeyCode() == keycode );

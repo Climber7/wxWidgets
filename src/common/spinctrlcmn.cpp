@@ -18,9 +18,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_SPINCTRL
 
@@ -135,6 +132,12 @@ wxSize wxSpinCtrlImpl::GetBestSize(const wxControl* spin,
 {
     const wxString largestString('8', GetMaxValueLength(minVal, maxVal, base));
     return spin->GetSizeFromText(largestString);
+}
+
+bool wxSpinCtrlImpl::IsBaseCompatibleWithRange(int minVal, int maxVal, int base)
+{
+    // Negative values in the range are allowed only if base == 10
+    return base == 10 || (minVal >= 0 && maxVal >= 0);
 }
 
 #endif // wxUSE_SPINCTRL

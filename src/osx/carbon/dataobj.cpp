@@ -34,6 +34,8 @@
 
 static CFStringRef kUTTypeTraditionalMacText = CFSTR("com.apple.traditional-mac-plain-text");
 
+static wxString privateUTIPrefix = "org.wxwidgets.private.";
+
 // ----------------------------------------------------------------------------
 // wxDataFormat
 // ----------------------------------------------------------------------------
@@ -65,6 +67,7 @@ wxDataFormat::wxDataFormat(const wxDataFormat& rFormat)
 {
     m_format = rFormat.m_format;
     m_type = rFormat.m_type;
+    m_id = rFormat.m_id;
 }
 
 wxDataFormat::wxDataFormat(NativeFormat format)
@@ -80,6 +83,7 @@ wxDataFormat& wxDataFormat::operator=(const wxDataFormat& rFormat)
 {
     m_format = rFormat.m_format;
     m_type = rFormat.m_type;
+    m_id = rFormat.m_id;
     return *this;
 }
 
@@ -93,7 +97,13 @@ wxDataFormat::NativeFormat wxDataFormat::GetFormatForType(wxDataFormatId type)
             break;
             
         case wxDF_UNICODETEXT:
+#ifdef wxNEEDS_UTF8_FOR_TEXT_DATAOBJ
+            f = kUTTypeUTF8PlainText;
+#elif defined(wxNEEDS_UTF16_FOR_TEXT_DATAOBJ)
             f = kUTTypeUTF16PlainText;
+#else
+#error "one of wxNEEDS_UTF{8,16}_FOR_TEXT_DATAOBJ must be defined"
+#endif
             break;
             
         case wxDF_HTML:
@@ -122,10 +132,21 @@ wxDataFormat::NativeFormat wxDataFormat::GetFormatForType(wxDataFormatId type)
 void wxDataFormat::SetType( wxDataFormatId dataType )
 {
     m_type = dataType;
-    m_format = GetFormatForType(dataType);
+    m_format = wxCFRetain(GetFormatForType(dataType));
+    m_id = wxCFStringRef( m_format ).AsString();
 }
 
-void wxDataFormat::AddSupportedTypes(CFMutableArrayRef cfarray) const
+void wxDataFormat::AddSupportedTypesForSetting(CFMutableArrayRef types) const
+{
+    DoAddSupportedTypes(types, true);
+}
+
+void wxDataFormat::AddSupportedTypesForGetting(CFMutableArrayRef types) const
+{
+    DoAddSupportedTypes(types, false);
+}
+
+void wxDataFormat::DoAddSupportedTypes(CFMutableArrayRef cfarray, bool forSetting) const
 {
     if ( GetType() == wxDF_PRIVATE )
     {
@@ -134,32 +155,37 @@ void wxDataFormat::AddSupportedTypes(CFMutableArrayRef cfarray) const
     else
     {
         CFArrayAppendValue(cfarray, GetFormatForType(m_type));
-        // add additional accepted types
-        switch (GetType())
+        if ( forSetting )
         {
-            case wxDF_UNICODETEXT:
-                CFArrayAppendValue(cfarray, kUTTypeUTF8PlainText);
-                break;
-            case wxDF_FILENAME:
-                CFArrayAppendValue(cfarray, kPasteboardTypeFileURLPromise);
-                break;
-            case wxDF_BITMAP:
-                CFArrayAppendValue(cfarray, kUTTypePICT);
-                break;
-            default:
-                break;
+            // add additional accepted types which we are ready to accept and can
+            // convert to our internal formats
+            switch (GetType())
+            {
+                case wxDF_UNICODETEXT:
+                    CFArrayAppendValue(cfarray, kUTTypeUTF8PlainText);
+                    break;
+                case wxDF_FILENAME:
+                    CFArrayAppendValue(cfarray, kPasteboardTypeFileURLPromise);
+                    break;
+                 default:
+                    break;
+            }
         }
     }
 }
 
 wxString wxDataFormat::GetId() const
 {
-    return wxCFStringRef(wxCFRetain((CFStringRef)m_format)).AsString();
+    return m_id;
 }
 
 void wxDataFormat::SetId( NativeFormat format )
 {
-    m_format = format;
+    m_format = wxCFRetain(format);
+    m_id = wxCFStringRef( m_format ).AsString();
+    if ( m_id.StartsWith(privateUTIPrefix) )
+        m_id = m_id.Mid(privateUTIPrefix.length());
+
     if ( UTTypeConformsTo( (CFStringRef)format, kUTTypeHTML ) )
     {
         m_type = wxDF_HTML;
@@ -202,8 +228,15 @@ void wxDataFormat::SetId( NativeFormat format )
 void wxDataFormat::SetId( const wxString& zId )
 {
     m_type = wxDF_PRIVATE;
-    // since it is private, no need to conform to anything ...
-    m_format = wxCFStringRef(zId);
+    m_id = zId;
+
+    // in newer macOS version this must conform to a UTI
+    // https://developer.apple.com/library/archive/documentation/General/Conceptual/DevPedia-CocoaCore/UniformTypeIdentifier.html
+
+    if ( zId.Find('.') != wxNOT_FOUND )
+        m_format = wxCFStringRef(zId);
+    else
+        m_format = wxCFStringRef(privateUTIPrefix+zId);
 }
 
 bool wxDataFormat::operator==(const wxDataFormat& format) const
@@ -377,7 +410,7 @@ bool wxDataObject::ReadFromSource(wxOSXDataSource * source)
         if (source->IsSupported(dataFormat))
         {
             wxCFMutableArrayRef<CFStringRef> typesarray;
-            dataFormat.AddSupportedTypes(typesarray);
+            dataFormat.AddSupportedTypesForSetting(typesarray);
             size_t itemCount = source->GetItemCount();
             
             for ( size_t itemIndex = 0; itemIndex < itemCount && !transferred; ++itemIndex)
@@ -522,15 +555,19 @@ bool wxDataObject::CanReadFromSource( wxDataObject * source ) const
     return GetSupportedFormatInSource(source) != wxDF_INVALID;
 }
 
-void wxDataObject::AddSupportedTypes( CFMutableArrayRef cfarray) const
+void wxDataObject::AddSupportedTypes( CFMutableArrayRef cfarray, Direction dir) const
 {
-    size_t nFormats = GetFormatCount(wxDataObject::Set);
-    wxScopedArray<wxDataFormat> array(GetFormatCount());
-    GetAllFormats(array.get(), wxDataObject::Set);
+    size_t nFormats = GetFormatCount(dir);
+    wxScopedArray<wxDataFormat> array(nFormats);
+    GetAllFormats(array.get(), dir);
 
     for (size_t i = 0; i < nFormats; i++)
-        array[i].AddSupportedTypes(cfarray);
-
+    {
+        if ( dir == Direction::Get)
+            array[i].AddSupportedTypesForGetting(cfarray);
+        else
+            array[i].AddSupportedTypesForSetting(cfarray);
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -650,12 +687,7 @@ void wxBitmapDataObject::SetBitmap( const wxBitmap& rBitmap )
             CGImageDestinationFinalize( destination );
             CFRelease( destination );
         }
-        m_pictHandle = NewHandle(CFDataGetLength(data));
-        if ( m_pictHandle )
-        {
-            memcpy( *(Handle)m_pictHandle, (const char *)CFDataGetBytePtr(data), CFDataGetLength(data) );
-        }
-        CFRelease( data );
+        m_pictData = data;
 
         CGImageRelease(cgImageRef);
     }
@@ -663,23 +695,21 @@ void wxBitmapDataObject::SetBitmap( const wxBitmap& rBitmap )
 
 void wxBitmapDataObject::Init()
 {
-    m_pictHandle = NULL;
-    m_pictCreated = false;
+    m_pictData = NULL;
 }
 
 void wxBitmapDataObject::Clear()
 {
-    if (m_pictHandle != NULL)
+    if (m_pictData != NULL)
     {
-        DisposeHandle( (Handle) m_pictHandle );
-        m_pictHandle = NULL;
+        CFRelease( m_pictData );
+        m_pictData = NULL;
     }
-    m_pictCreated = false;
 }
 
 bool wxBitmapDataObject::GetDataHere( void *pBuf ) const
 {
-    if (m_pictHandle == NULL)
+    if (m_pictData == NULL)
     {
         wxFAIL_MSG( wxT("attempt to copy empty bitmap failed") );
         return false;
@@ -688,28 +718,17 @@ bool wxBitmapDataObject::GetDataHere( void *pBuf ) const
     if (pBuf == NULL)
         return false;
 
-    memcpy( pBuf, *(Handle)m_pictHandle, GetHandleSize( (Handle)m_pictHandle ) );
+    memcpy( pBuf, (const char *)CFDataGetBytePtr(m_pictData), CFDataGetLength(m_pictData) );
 
     return true;
 }
 
 size_t wxBitmapDataObject::GetDataSize() const
 {
-    if (m_pictHandle != NULL)
-        return GetHandleSize( (Handle)m_pictHandle );
+    if (m_pictData != NULL)
+        return CFDataGetLength(m_pictData);
     else
         return 0;
-}
-
-Handle MacCreateDataReferenceHandle(Handle theDataHandle)
-{
-    Handle  dataRef = NULL;
-    OSErr   err     = noErr;
-
-    // Create a data reference handle for our data.
-    err = PtrToHand( &theDataHandle, &dataRef, sizeof(Handle));
-
-    return dataRef;
 }
 
 bool wxBitmapDataObject::SetData( size_t nSize, const void *pBuf )
@@ -719,19 +738,16 @@ bool wxBitmapDataObject::SetData( size_t nSize, const void *pBuf )
     if ((pBuf == NULL) || (nSize == 0))
         return false;
 
-    Handle picHandle = NewHandle( nSize );
-    memcpy( *picHandle, pBuf, nSize );
-    m_pictHandle = picHandle;
-    CGImageRef cgImageRef = 0;
+    CGImageRef cgImageRef = NULL;
 
-    CFDataRef data = CFDataCreateWithBytesNoCopy( kCFAllocatorDefault, (const UInt8*) pBuf, nSize, kCFAllocatorNull);
+    CFDataRef data = CFDataCreate( kCFAllocatorDefault, (const UInt8*) pBuf, nSize);
     CGImageSourceRef source = CGImageSourceCreateWithData( data, NULL );
     if ( source )
     {
         cgImageRef = CGImageSourceCreateImageAtIndex(source, 0, NULL);
         CFRelease( source );
     }
-    CFRelease( data );
+    m_pictData = data;
 
     if ( cgImageRef )
     {

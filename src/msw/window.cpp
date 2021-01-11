@@ -19,9 +19,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #include "wx/window.h"
 
@@ -105,6 +102,7 @@
 #include "wx/notebook.h"
 #include "wx/listctrl.h"
 #include "wx/dynlib.h"
+#include "wx/display.h"
 
 #include <string.h>
 
@@ -2952,6 +2950,33 @@ wxWindowMSW::MSWHandleMessage(WXLRESULT *result,
     // for most messages we should return 0 when we do process the message
     rc.result = 0;
 
+    // Special hook for dismissing the current popup if it's active. It's a bit
+    // ugly to have to do this here, but the only alternatives seem to be
+    // installing a WH_CBT hook in wxPopupTransientWindow code, which is not
+    // really much better.
+#if wxUSE_POPUPWIN
+    // Note that we let the popup window, or its child, have the event if it
+    // happens inside it -- it's supposed to react to it and we don't want to
+    // dismiss it before it can do it.
+    if ( wxCurrentPopupWindow && !wxCurrentPopupWindow->IsDescendant(this) )
+    {
+        switch ( message )
+        {
+            case WM_NCLBUTTONDOWN:
+            case WM_NCRBUTTONDOWN:
+            case WM_NCMBUTTONDOWN:
+
+            case WM_LBUTTONDOWN:
+            case WM_RBUTTONDOWN:
+            case WM_MBUTTONDOWN:
+
+            case WM_SETFOCUS:
+            case WM_KILLFOCUS:
+                wxCurrentPopupWindow->MSWDismissUnfocusedPopup();
+        }
+    }
+#endif // wxUSE_POPUPWIN
+
     switch ( message )
     {
         case WM_CREATE:
@@ -3696,6 +3721,7 @@ wxWindowMSW::MSWHandleMessage(WXLRESULT *result,
             }
             break;
 
+#if wxUSE_POPUPWIN
         case WM_NCACTIVATE:
             // When we're losing activation to our own popup window, we want to
             // retain the "active" appearance of the title bar, as dropping
@@ -3712,6 +3738,7 @@ wxWindowMSW::MSWHandleMessage(WXLRESULT *result,
                 processed = true;
             }
             break;
+#endif
 
 #if wxUSE_UXTHEME
         // If we want the default themed border then we need to draw it ourselves
@@ -4269,6 +4296,14 @@ bool wxWindowMSW::HandleActivate(int state,
         return false;
     }
 
+    if ( m_isBeingDeleted )
+    {
+        // Same goes for activation events sent to an already half-destroyed
+        // window: this doesn't happen always, but can happen for a TLW using a
+        // (still existent) hidden parent, see #18970.
+        return false;
+    }
+
     wxActivateEvent event(wxEVT_ACTIVATE,
                           (state == WA_ACTIVE) || (state == WA_CLICKACTIVE),
                           m_windowId,
@@ -4772,7 +4807,12 @@ int wxGetSystemMetrics(int nIndex, const wxWindow* win)
 /*extern*/
 bool wxSystemParametersInfo(UINT uiAction, UINT uiParam, PVOID pvParam, UINT fWinIni, const wxWindow* win)
 {
-#if wxUSE_DYNLIB_CLASS
+    // Note that we can't use SystemParametersInfoForDpi() in non-Unicode build
+    // because it always works with wide strings and we'd have to check for all
+    // uiAction values corresponding to strings and use a temporary wide buffer
+    // for them, and convert the returned value to ANSI after the call. Instead
+    // of doing all this, just don't use it at all in the deprecated ANSI build.
+#if wxUSE_DYNLIB_CLASS && wxUSE_UNICODE
     const wxWindow* window = (!win && wxTheApp) ? wxTheApp->GetTopWindow() : win;
 
     if ( window )
@@ -4829,6 +4869,16 @@ wxSize wxWindowMSW::GetDPI() const
     return dpi;
 }
 
+double wxWindowMSW::GetDPIScaleFactor() const
+{
+    return GetDPI().y / (double)wxDisplay::GetStdPPIValue();
+}
+
+void wxWindowMSW::WXAdjustFontToOwnPPI(wxFont& font) const
+{
+    font.WXAdjustToPPI(GetDPI());
+}
+
 void wxWindowMSW::MSWUpdateFontOnDPIChange(const wxSize& newDPI)
 {
     if ( m_font.IsOk() )
@@ -4847,7 +4897,7 @@ static void ScaleCoordIfSet(int& coord, float scaleFactor)
     if ( coord != wxDefaultCoord )
     {
         const float coordScaled = coord * scaleFactor;
-        coord = scaleFactor > 1.0 ? ceil(coordScaled) : floor(coordScaled);
+        coord = int(scaleFactor > 1 ? std::ceil(coordScaled) : std::floor(coordScaled));
     }
 }
 
@@ -4879,10 +4929,13 @@ static void UpdateSizerOnDPIChange(wxSizer* sizer, float scaleFactor)
             ScaleCoordIfSet(min.y, scaleFactor);
             sizerItem->SetMinSize(min);
 
-            wxSize size = sizerItem->GetSize();
-            ScaleCoordIfSet(size.x, scaleFactor);
-            ScaleCoordIfSet(size.y, scaleFactor);
-            sizerItem->SetDimension(wxDefaultPosition, size);
+            if ( sizerItem->IsSpacer() )
+            {
+                wxSize size = sizerItem->GetSize();
+                ScaleCoordIfSet(size.x, scaleFactor);
+                ScaleCoordIfSet(size.y, scaleFactor);
+                sizerItem->SetDimension(wxDefaultPosition, size);
+            }
 
             // Update any child sizers if this is a sizer
             UpdateSizerOnDPIChange(sizerItem->GetSizer(), scaleFactor);

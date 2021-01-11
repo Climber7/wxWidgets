@@ -14,6 +14,7 @@
 
 #ifndef WX_PRECOMP
     #include "wx/log.h"
+    #include "wx/math.h"
     #include "wx/app.h"
     #include "wx/utils.h"
     #include "wx/panel.h"
@@ -79,6 +80,7 @@
 
 wxBEGIN_EVENT_TABLE(wxWindowMac, wxWindowBase)
     EVT_MOUSE_EVENTS(wxWindowMac::OnMouseEvent)
+    EVT_DPI_CHANGED(wxWindowMac::OnDPIChanged)
 wxEND_EVENT_TABLE()
 
 #define wxMAC_DEBUG_REDRAW 0
@@ -505,7 +507,7 @@ void wxWindowMac::DoSetWindowVariant( wxWindowVariant variant )
 void wxWindowMac::MacUpdateControlFont()
 {
     if ( GetPeer() )
-        GetPeer()->SetFont( GetFont() , GetForegroundColour() , GetWindowStyle() ) ;
+        GetPeer()->SetFont(GetFont()) ;
 
     // do not trigger refreshes upon invisible and possible partly created objects
     if ( IsShownOnScreen() )
@@ -935,9 +937,6 @@ void wxWindowMac::MacInvalidateBorders()
         return ;
 
     int outerBorder = MacGetLeftBorderSize() ;
-
-    if ( GetPeer()->NeedsFocusRect() )
-        outerBorder += 4 ;
 
     if ( outerBorder == 0 )
         return ;
@@ -1576,8 +1575,6 @@ void wxWindowMac::MacPaintBorders( int WXUNUSED(leftOrigin) , int WXUNUSED(right
 
 #if wxOSX_USE_COCOA_OR_CARBON
     {
-        const bool hasFocus = GetPeer()->NeedsFocusRect() && HasFocus();
-
         CGRect cgrect = CGRectMake( tx-1 , ty-1 , tw+2 ,
             th+2 ) ;
 
@@ -1592,7 +1589,6 @@ void wxWindowMac::MacPaintBorders( int WXUNUSED(leftOrigin) , int WXUNUSED(right
             info.version = 0 ;
             info.kind = 0 ;
             info.state = IsEnabled() ? kThemeStateActive : kThemeStateInactive ;
-            info.isFocused = hasFocus ;
 
             if ( HasFlag(wxRAISED_BORDER) || HasFlag(wxSUNKEN_BORDER) || HasFlag(wxDOUBLE_BORDER) )
             {
@@ -1604,11 +1600,6 @@ void wxWindowMac::MacPaintBorders( int WXUNUSED(leftOrigin) , int WXUNUSED(right
                 info.kind = kHIThemeFrameListBox ;
                 HIThemeDrawFrame( &cgrect , &info , cgContext , kHIThemeOrientationNormal ) ;
             }
-        }
-
-        if ( hasFocus )
-        {
-            HIThemeDrawFocusRect( &cgrect , true , cgContext , kHIThemeOrientationNormal ) ;
         }
     }
 #endif // wxOSX_USE_COCOA_OR_CARBON
@@ -2180,6 +2171,11 @@ bool wxWindowMac::AcceptsFocus() const
         return GetPeer()->CanFocus();
 }
 
+void wxWindowMac::EnableVisibleFocus(bool enabled)
+{
+    GetPeer()->EnableFocusRing(enabled);
+}
+
 void wxWindowMac::MacSuperChangedPosition()
 {
     // only window-absolute structures have to be moved i.e. controls
@@ -2345,6 +2341,25 @@ void wxWindowMac::OnMouseEvent( wxMouseEvent &event )
     }
 }
 
+// propagate the dpi changed event to the subwindows
+void wxWindowMac::OnDPIChanged(wxDPIChangedEvent& event)
+{
+    wxWindowList::compatibility_iterator node = GetChildren().GetFirst();
+    while ( node )
+    {
+        // Only propagate to non-top-level windows
+        wxWindow *win = node->GetData();
+        if ( !win->IsTopLevel() )
+        {
+            wxDPIChangedEvent event2( event.GetOldDPI(), event.GetNewDPI() );
+            event2.SetEventObject(win);
+            win->GetEventHandler()->ProcessEvent(event2);
+        }
+
+        node = node->GetNext();
+    }
+}
+
 void wxWindowMac::TriggerScrollEvent( wxEventType WXUNUSED(scrollEvent) )
 {
 }
@@ -2416,29 +2431,6 @@ bool wxWindowMac::CanSetTransparent()
 wxByte wxWindowMac::GetTransparent() const
 {
     return m_macAlpha ;
-}
-
-bool wxWindowMac::IsShownOnScreen() const
-{
-    if ( GetPeer() && GetPeer()->IsOk() )
-    {
-        bool peerVis = GetPeer()->IsVisible();
-        bool wxVis = wxWindowBase::IsShownOnScreen();
-        if( peerVis != wxVis )
-        {
-            // CS : put a breakpoint here to investigate differences
-            // between native an wx visibilities
-            // the only place where I've encountered them until now
-            // are the hiding/showing sequences where the vis-changed event is
-            // first sent to the innermost control, while wx does things
-            // from the outmost control
-            wxVis = wxWindowBase::IsShownOnScreen();
-            return wxVis;
-        }
-
-        return GetPeer()->IsVisible();
-    }
-    return wxWindowBase::IsShownOnScreen();
 }
 
 #if wxUSE_HOTKEY && wxOSX_USE_COCOA_OR_CARBON
@@ -2622,6 +2614,26 @@ bool wxWindowMac::OSXHandleKeyEvent( wxKeyEvent& event )
     return handled ;
 }
 
+/* static */
+wxSize wxWindowMac::OSXMakeDPIFromScaleFactor(double scaleFactor)
+{
+    const int dpi = wxRound(scaleFactor*72.0);
+
+    return wxSize(dpi, dpi);
+}
+
+wxSize wxWindowMac::GetDPI() const
+{
+    return OSXMakeDPIFromScaleFactor(GetDPIScaleFactor());
+}
+
+// on mac ContentScale and DPIScale are identical
+double wxWindowMac::GetDPIScaleFactor() const
+{
+    return GetContentScaleFactor();
+}
+
+
 //
 // wxWidgetImpl
 //
@@ -2728,18 +2740,7 @@ void wxWidgetImpl::Init()
     m_wantsUserKey = false;
     m_wantsUserMouse = false;
     m_wxPeer = NULL;
-    m_needsFocusRect = false;
     m_needsFrame = true;
-}
-
-void wxWidgetImpl::SetNeedsFocusRect( bool needs )
-{
-    m_needsFocusRect = needs;
-}
-
-bool wxWidgetImpl::NeedsFocusRect() const
-{
-    return m_needsFocusRect;
 }
 
 void wxWidgetImpl::SetNeedsFrame( bool needs )

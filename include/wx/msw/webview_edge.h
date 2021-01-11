@@ -74,7 +74,9 @@ public:
     virtual void Print() wxOVERRIDE;
 
     virtual wxWebViewZoom GetZoom() const wxOVERRIDE;
+    virtual float GetZoomFactor() const wxOVERRIDE;
     virtual void SetZoom(wxWebViewZoom zoom) wxOVERRIDE;
+    virtual void SetZoomFactor(float zoom) wxOVERRIDE;
 
     //Clipboard functions
     virtual bool CanCut() const wxOVERRIDE;
@@ -120,10 +122,6 @@ public:
 
     virtual void* GetNativeBackend() const wxOVERRIDE;
 
-    // ---- Edge-specific methods
-
-    static bool IsAvailable();
-
 protected:
     virtual void DoSetPage(const wxString& html, const wxString& baseUrl) wxOVERRIDE;
 
@@ -131,6 +129,8 @@ private:
     wxWebViewEdgeImpl* m_impl;
 
     void OnSize(wxSizeEvent& event);
+
+    void OnShow(wxShowEvent& event);
 
     bool RunScriptSync(const wxString& javascript, wxString* output = NULL);
 
@@ -151,6 +151,7 @@ public:
     {
         return new wxWebViewEdge(parent, id, url, pos, size, style, name);
     }
+    virtual bool IsAvailable() wxOVERRIDE;
 };
 
 #endif // wxUSE_WEBVIEW && wxUSE_WEBVIEW_EDGE && defined(__WXMSW__)

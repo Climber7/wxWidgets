@@ -15,22 +15,22 @@ if(WXMSW)
     wx_append_sources(MEDIA_FILES MEDIA_MSW)
 elseif(WXOSX_COCOA)
     wx_append_sources(MEDIA_FILES MEDIA_OSX_COCOA)
-elseif(UNIX)
+elseif(WXOSX_IPHONE)
+    wx_append_sources(MEDIA_FILES MEDIA_OSX_IPHONE)
+elseif(WXGTK)
     wx_append_sources(MEDIA_FILES MEDIA_UNIX)
 elseif(WXQT)
     wx_append_sources(MEDIA_FILES MEDIA_QT)
 endif()
 
 wx_add_library(wxmedia ${MEDIA_FILES})
-if(WXOSX_COCOA)
-    # TODO: add version detection of some kind and/or wx_option
-    wx_lib_compile_definitions(wxmedia PRIVATE -DwxOSX_USE_QTKIT=0)
+if(WXOSX)
     wx_lib_link_libraries(wxmedia PUBLIC
         "-framework AVFoundation"
-        "-framework AVKit"
         "-framework CoreMedia"
+        "-weak_framework AVKit"
         )
-elseif(UNIX)
+elseif(WXGTK)
     wx_lib_include_directories(wxmedia PUBLIC ${GSTREAMER_INCLUDE_DIRS})
     if(GSTREAMER_INTERFACES_INCLUDE_DIRS)
         wx_lib_include_directories(wxmedia PUBLIC ${GSTREAMER_INTERFACES_INCLUDE_DIRS})

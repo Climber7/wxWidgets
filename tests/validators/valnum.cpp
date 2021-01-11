@@ -8,9 +8,6 @@
 
 #include "testprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/app.h"
@@ -210,16 +207,6 @@ void NumValidatorTestCase::Interactive()
     if ( IsAutomaticTest() )
         return;
 #endif // __WXMSW__
-
-#ifdef __WXGTK20__
-    // Travis CI fails without this!
-    if ( IsAutomaticTest() )
-    {
-        wxFrame* frame = wxDynamicCast(wxTheApp->GetTopWindow(), wxFrame);
-        frame->SetFocus();
-        frame->Raise();
-    }
-#endif // __WXGTK20__
 
     // Set a locale using comma as thousands separator character.
     wxLocale loc(wxLANGUAGE_ENGLISH_UK, wxLOCALE_DONT_LOAD_DEFAULT);

@@ -16,9 +16,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_STC
 
@@ -1039,7 +1036,7 @@ void ScintillaWX::DoGainFocus(){
     CreateSystemCaret();
 }
 
-void ScintillaWX::DoSysColourChange() {
+void ScintillaWX::DoInvalidateStyleData() {
     InvalidateStyleData();
 }
 
@@ -1508,15 +1505,10 @@ void ScintillaWX::ImeStartComposition() {
             const int styleHere = pdoc->StyleIndexAt(sel.MainCaret());
             LOGFONTW lf = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"" };
             int sizeZoomed = vs.styles[styleHere].size + vs.zoomLevel * SC_FONT_SIZE_MULTIPLIER;
-            if (sizeZoomed <= 2 * SC_FONT_SIZE_MULTIPLIER)	// Hangs if sizeZoomed <= 1
+            if (sizeZoomed <= 2 * SC_FONT_SIZE_MULTIPLIER) // Hangs if sizeZoomed <= 1
                 sizeZoomed = 2 * SC_FONT_SIZE_MULTIPLIER;
-            AutoSurface surface(this);
-            int deviceHeight = sizeZoomed;
-            if (surface) {
-                deviceHeight = (sizeZoomed * surface->LogPixelsY()) / 72;
-            }
             // The negative is to allow for leading
-            lf.lfHeight = -(std::abs(deviceHeight / SC_FONT_SIZE_MULTIPLIER));
+            lf.lfHeight = -::MulDiv(sizeZoomed, stc->GetDPI().y, 72 * SC_FONT_SIZE_MULTIPLIER);
             lf.lfWeight = vs.styles[styleHere].weight;
             lf.lfItalic = static_cast<BYTE>(vs.styles[styleHere].italic ? 1 : 0);
             lf.lfCharSet = DEFAULT_CHARSET;

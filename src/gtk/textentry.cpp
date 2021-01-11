@@ -18,9 +18,6 @@
 // for compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #if wxUSE_TEXTCTRL || wxUSE_COMBOBOX
 
@@ -1149,6 +1146,8 @@ wxString wxTextEntry::GetHint() const
 bool wxTextEntry::ClickDefaultButtonIfPossible()
 {
     GtkWidget* const widget = GTK_WIDGET(GetEntry());
+    if (widget == NULL)
+        return false;
 
     // This does the same thing as gtk_entry_real_activate() in GTK itself.
     //

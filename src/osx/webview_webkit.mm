@@ -33,7 +33,7 @@
 #include <UIKit/UIWebView.h>
 #else
 #include <WebKit/WebKit.h>
-#if MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_15
+#if __MAC_OS_X_VERSION_MAX_ALLOWED < MAC_OS_X_VERSION_10_15
   #include <WebKit/HIWebView.h>
   #include <WebKit/CarbonUtils.h>
 #endif
@@ -44,12 +44,6 @@
 
 #define DEBUG_WEBKIT_SIZING 0
 
-#if defined(MAC_OS_X_VERSION_10_11) && (MAC_OS_X_VERSION_MAX_ALLOWED >= MAC_OS_X_VERSION_10_11)
-    #define wxWEBKIT_PROTOCOL_SINCE_10_11(proto) < proto >
-#else
-    #define wxWEBKIT_PROTOCOL_SINCE_10_11(proto)
-#endif
-
 // ----------------------------------------------------------------------------
 // macros
 // ----------------------------------------------------------------------------
@@ -59,7 +53,7 @@ wxIMPLEMENT_DYNAMIC_CLASS(wxWebViewWebKit, wxWebView);
 wxBEGIN_EVENT_TABLE(wxWebViewWebKit, wxControl)
 wxEND_EVENT_TABLE()
 
-@interface WebViewLoadDelegate : NSObject wxWEBKIT_PROTOCOL_SINCE_10_11(WebFrameLoadDelegate)
+@interface WebViewLoadDelegate : NSObject<WebFrameLoadDelegate>
 {
     wxWebViewWebKit* webKitWindow;
 }
@@ -68,7 +62,7 @@ wxEND_EVENT_TABLE()
 
 @end
 
-@interface WebViewPolicyDelegate : NSObject wxWEBKIT_PROTOCOL_SINCE_10_11(WebPolicyDelegate)
+@interface WebViewPolicyDelegate : NSObject<WebPolicyDelegate>
 {
     wxWebViewWebKit* webKitWindow;
 }
@@ -77,7 +71,7 @@ wxEND_EVENT_TABLE()
 
 @end
 
-@interface WebViewUIDelegate : NSObject wxWEBKIT_PROTOCOL_SINCE_10_11(WebUIDelegate)
+@interface WebViewUIDelegate : NSObject<WebUIDelegate>
 {
     wxWebViewWebKit* webKitWindow;
 }
@@ -456,7 +450,7 @@ bool wxWebViewWebKit::RunScript(const wxString& javascript, wxString* output)
     return true;
 }
 
-void wxWebViewWebKit::OnSize(wxSizeEvent &event)
+void wxWebViewWebKit::OnSize(wxSizeEvent &WXUNUSED(event))
 {
 }
 
@@ -520,6 +514,11 @@ wxWebViewZoom wxWebViewWebKit::GetZoom() const
     return wxWEBVIEW_ZOOM_MEDIUM;
 }
 
+float wxWebViewWebKit::GetZoomFactor() const
+{
+    return GetWebkitZoom();
+}
+
 void wxWebViewWebKit::SetZoom(wxWebViewZoom zoom)
 {
     // arbitrary way to map our common zoom enum to float zoom
@@ -549,6 +548,11 @@ void wxWebViewWebKit::SetZoom(wxWebViewZoom zoom)
             wxASSERT(false);
     }
 
+}
+
+void wxWebViewWebKit::SetZoomFactor(float zoom)
+{
+    SetWebkitZoom(zoom);
 }
 
 void wxWebViewWebKit::DoSetPage(const wxString& src, const wxString& baseUrl)
@@ -739,6 +743,8 @@ void wxWebViewWebKit::RegisterHandler(wxSharedPtr<wxWebViewHandler> handler)
 - (void)webView:(WebView *)sender
     didStartProvisionalLoadForFrame:(WebFrame *)frame
 {
+    wxUnusedVar(sender);
+    wxUnusedVar(frame);
     webKitWindow->m_busy = true;
 }
 
@@ -902,6 +908,8 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 - (void)webView:(WebView *)sender didReceiveTitle:(NSString *)title
                                          forFrame:(WebFrame *)frame
 {
+    wxUnusedVar(sender);
+
     wxString target = wxCFStringRef::AsString([frame name]);
     wxWebViewEvent event(wxEVT_WEBVIEW_TITLE_CHANGED,
                          webKitWindow->GetId(),
@@ -932,6 +940,8 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
                                   frame:(WebFrame *)frame
                        decisionListener:(id<WebPolicyDecisionListener>)listener
 {
+    wxUnusedVar(sender);
+    wxUnusedVar(actionInformation);
     wxUnusedVar(frame);
 
     NSString *url = [[request URL] absoluteString];
@@ -979,6 +989,9 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
                         newFrameName:(NSString *)frameName
                     decisionListener:(id < WebPolicyDecisionListener >)listener
 {
+    wxUnusedVar(sender);
+    wxUnusedVar(frameName);
+
     NSString *url = [[request URL] absoluteString];
 
     wxWebViewNavigationActionFlags flags = wxWEBVIEW_NAV_ACTION_USER;
@@ -1108,6 +1121,7 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
     // This method is called when window.open() is used in javascript with a target != _self
     // request is always nil, so it can't be used for event generation
     // Mark the next navigation as "new window"
+    wxUnusedVar(request);
     webKitWindow->m_nextNavigationIsNewWindow = true;
     return sender;
 }
@@ -1123,6 +1137,9 @@ wxString nsErrorToWxHtmlError(NSError* error, wxWebViewNavigationError* out)
 - (NSArray *)webView:(WebView *)sender contextMenuItemsForElement:(NSDictionary *)element
                                                  defaultMenuItems:(NSArray *) defaultMenuItems
 {
+    wxUnusedVar(sender);
+    wxUnusedVar(element);
+
     if(webKitWindow->IsContextMenuEnabled())
         return defaultMenuItems;
     else

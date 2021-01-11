@@ -19,9 +19,6 @@
 // For compilers that support precompilation, includes "wx.h".
 #include "wx/wxprec.h"
 
-#ifdef __BORLANDC__
-    #pragma hdrstop
-#endif
 
 #ifndef WX_PRECOMP
     #include "wx/msw/wrapcdlg.h"
@@ -2100,6 +2097,46 @@ void wxMSWDCImpl::SetDeviceOrigin(wxCoord x, wxCoord y)
     m_isClipBoxValid = false;
 }
 
+wxPoint wxMSWDCImpl::DeviceToLogical(wxCoord x, wxCoord y) const
+{
+    POINT p[1];
+    p[0].x = x;
+    p[0].y = y;
+    ::DPtoLP(GetHdc(), p, WXSIZEOF(p));
+    return wxPoint(p[0].x, p[0].y);
+}
+
+wxPoint wxMSWDCImpl::LogicalToDevice(wxCoord x, wxCoord y) const
+{
+    POINT p[1];
+    p[0].x = x;
+    p[0].y = y;
+    ::LPtoDP(GetHdc(), p, WXSIZEOF(p));
+    return wxPoint(p[0].x, p[0].y);
+}
+
+wxSize wxMSWDCImpl::DeviceToLogicalRel(int x, int y) const
+{
+    POINT p[2];
+    p[0].x = 0;
+    p[0].y = 0;
+    p[1].x = x;
+    p[1].y = y;
+    ::DPtoLP(GetHdc(), p, WXSIZEOF(p));
+    return wxSize(p[1].x-p[0].x, p[1].y-p[0].y);
+}
+
+wxSize wxMSWDCImpl::LogicalToDeviceRel(int x, int y) const
+{
+    POINT p[2];
+    p[0].x = 0;
+    p[0].y = 0;
+    p[1].x = x;
+    p[1].y = y;
+    ::LPtoDP(GetHdc(), p, WXSIZEOF(p));
+    return wxSize(p[1].x-p[0].x, p[1].y-p[0].y);
+}
+
 // ----------------------------------------------------------------------------
 // Transform matrix
 // ----------------------------------------------------------------------------
@@ -2553,11 +2590,6 @@ wxSize wxMSWDCImpl::GetPPI() const
     }
 
     return ppi;
-}
-
-double wxMSWDCImpl::GetContentScaleFactor() const
-{
-    return GetPPI().y / 96.0;
 }
 
 // ----------------------------------------------------------------------------

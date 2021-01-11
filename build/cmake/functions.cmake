@@ -77,19 +77,15 @@ endmacro()
 function(wx_set_common_target_properties target_name)
     cmake_parse_arguments(wxCOMMON_TARGET_PROPS "DEFAULT_WARNINGS" "" "" ${ARGN})
 
-    if(APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 10.9 AND wxHAS_CXX11)
-        if(CMAKE_GENERATOR STREQUAL "Xcode")
-            set_target_properties(${target_name} PROPERTIES XCODE_ATTRIBUTE_CLANG_CXX_LIBRARY libc++)
-        else()
-            target_compile_options(${target_name} PUBLIC "-stdlib=libc++")
-            target_link_libraries(${target_name} PRIVATE "-stdlib=libc++")
-        endif()
-    endif()
     set_target_properties(${target_name} PROPERTIES
         LIBRARY_OUTPUT_DIRECTORY "${wxOUTPUT_DIR}${wxPLATFORM_LIB_DIR}"
         ARCHIVE_OUTPUT_DIRECTORY "${wxOUTPUT_DIR}${wxPLATFORM_LIB_DIR}"
         RUNTIME_OUTPUT_DIRECTORY "${wxOUTPUT_DIR}${wxPLATFORM_LIB_DIR}"
         )
+
+    if(wxBUILD_PIC)
+        set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+    endif()
 
     if(MSVC)
         if(wxCOMMON_TARGET_PROPS_DEFAULT_WARNINGS)
@@ -348,7 +344,7 @@ macro(wx_add_library name)
         add_library(${name} ${wxBUILD_LIB_TYPE} ${src_files})
         add_library(wx::${name_short} ALIAS ${name})
         wx_set_target_properties(${name} ${wxADD_LIBRARY_IS_BASE})
-        set_property(TARGET ${name} PROPERTY PROJECT_LABEL ${name_short})
+        set_target_properties(${name} PROPERTIES PROJECT_LABEL ${name_short})
 
         # Setup install
         wx_install(TARGETS ${name}
@@ -506,6 +502,10 @@ function(wx_set_builtin_target_properties target_name)
 
     set_target_properties(${target_name} PROPERTIES FOLDER "Third Party Libraries")
 
+    if(wxBUILD_SHARED OR wxBUILD_PIC)
+        set_target_properties(${target_name} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
+    endif()
+
     wx_set_common_target_properties(${target_name} DEFAULT_WARNINGS)
     if(NOT wxBUILD_SHARED)
         wx_install(TARGETS ${name} ARCHIVE DESTINATION "lib${wxPLATFORM_LIB_DIR}")
@@ -525,10 +525,7 @@ function(wx_add_builtin_library name)
     add_library(${name} STATIC ${src_list})
     add_library(wx::${name_short} ALIAS ${name})
     wx_set_builtin_target_properties(${name})
-    set_property(TARGET ${name} PROPERTY PROJECT_LABEL ${name_short})
-    if(wxBUILD_SHARED)
-        set_target_properties(${name} PROPERTIES POSITION_INDEPENDENT_CODE TRUE)
-    endif()
+    set_target_properties(${name} PROPERTIES PROJECT_LABEL ${name_short})
 endfunction()
 
 # List of third party libraries added via wx_add_thirdparty_library()

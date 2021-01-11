@@ -46,7 +46,7 @@ public:
                 const wxSize &size = wxDefaultSize,
                 long style = wxLC_ICON,
                 const wxValidator& validator = wxDefaultValidator,
-                const wxString &name = wxListCtrlNameStr)
+                const wxString &name = wxASCII_STR(wxListCtrlNameStr))
             : wxScrollHelper(this)
     {
         Create(parent, winid, pos, size, style, validator, name);
@@ -62,7 +62,7 @@ public:
                  const wxSize &size = wxDefaultSize,
                  long style = wxLC_ICON,
                  const wxValidator& validator = wxDefaultValidator,
-                 const wxString &name = wxListCtrlNameStr);
+                 const wxString &name = wxASCII_STR(wxListCtrlNameStr));
 
     bool GetColumn( int col, wxListItem& item ) const wxOVERRIDE;
     bool SetColumn( int col, const wxListItem& item ) wxOVERRIDE;
@@ -189,6 +189,8 @@ public:
     virtual bool SetFont( const wxFont &font ) wxOVERRIDE;
     virtual bool SetCursor( const wxCursor &cursor ) wxOVERRIDE;
 
+    virtual void ExtendRulesAndAlternateColour(bool extend = true) wxOVERRIDE;
+
 #if wxUSE_DRAG_AND_DROP
     virtual void SetDropTarget( wxDropTarget *dropTarget ) wxOVERRIDE;
     virtual wxDropTarget *GetDropTarget() const wxOVERRIDE;
@@ -258,7 +260,7 @@ public:
                const wxSize& size = wxDefaultSize,
                long style = wxLC_ICON,
                const wxValidator &validator = wxDefaultValidator,
-               const wxString &name = wxListCtrlNameStr)
+               const wxString &name = wxASCII_STR(wxListCtrlNameStr))
     : wxGenericListCtrl(parent, winid, pos, size, style, validator, name)
     {
     }

@@ -529,9 +529,15 @@ public:
         return wxSize( wxMax( client.x, best.x ), wxMax( client.y, best.y ) );
     }
 
-    // returns the magnification of the content of this window
-    // e.g. 2.0 for a window on a retina screen
+    // Return the magnification of the content of this window for the platforms
+    // using logical pixels different from physical ones, i.e. those for which
+    // wxHAVE_DPI_INDEPENDENT_PIXELS is defined. For the other ones, always
+    // returns 1, regardless of DPI scale factor returned by the function below.
     virtual double GetContentScaleFactor() const;
+
+    // Return the ratio of the DPI used by this window to the standard DPI,
+    // e.g. 1 for standard DPI screens and 2 for "200% scaling".
+    virtual double GetDPIScaleFactor() const;
 
     // return the size of the left/right and top/bottom borders in x and y
     // components of the result respectively
@@ -649,7 +655,7 @@ public:
         // state, i.e. the state in which the window would be if all its
         // parents were enabled (use IsEnabled() above to get the effective
         // window state)
-    bool IsThisEnabled() const { return m_isEnabled; }
+    virtual bool IsThisEnabled() const { return m_isEnabled; }
 
     // returns true if the window is visible, i.e. IsShown() returns true
     // if called on it and all its parents up to the first TLW
@@ -728,7 +734,11 @@ public:
         // can this window be given focus by keyboard navigation? if not, the
         // only way to give it focus (provided it accepts it at all) is to
         // click it
-    virtual bool AcceptsFocusFromKeyboard() const { return AcceptsFocus(); }
+    virtual bool AcceptsFocusFromKeyboard() const
+        { return !m_disableFocusFromKbd && AcceptsFocus(); }
+
+        // Disable any input focus from the keyboard
+    void DisableFocusFromKeyboard() { m_disableFocusFromKbd = true; }
 
 
         // Can this window be focused right now, in its current state? This
@@ -756,6 +766,9 @@ public:
 
         // call this when the return value of AcceptsFocus() changes
     virtual void SetCanFocus(bool WXUNUSED(canFocus)) { }
+
+        // call to customize visible focus indicator if possible in the port
+    virtual void EnableVisibleFocus(bool WXUNUSED(enabled)) { }
 
         // navigates inside this window
     bool NavigateIn(int flags = wxNavigationKeyEvent::IsForward)
@@ -954,10 +967,17 @@ public:
         // Get the DPI used by the given window or wxSize(0, 0) if unknown.
     virtual wxSize GetDPI() const;
 
+    // Some ports need to modify the font object when the DPI of the window it
+    // is used with changes, this function can be used to do it.
+    //
+    // Currently it is only used in wxMSW and is not considered to be part of
+    // wxWidgets public API.
+    virtual void WXAdjustFontToOwnPPI(wxFont& WXUNUSED(font)) const { }
+
         // DPI-independent pixels, or DIPs, are pixel values for the standard
         // 96 DPI display, they are scaled to take the current resolution into
         // account (i.e. multiplied by the same factor as returned by
-        // GetContentScaleFactor()) if necessary for the current platform.
+        // GetDPIScaleFactor()) if necessary for the current platform.
         //
         // To support monitor-specific resolutions, prefer using the non-static
         // member functions or use a valid (non-null) window pointer.
@@ -1603,7 +1623,7 @@ protected:
                     const wxSize& size = wxDefaultSize,
                     long style = 0,
                     const wxValidator& validator = wxDefaultValidator,
-                    const wxString& name = wxPanelNameStr);
+                    const wxString& name = wxASCII_STR(wxPanelNameStr));
 
     bool CreateBase(wxWindowBase *parent,
                     wxWindowID winid,
@@ -1732,6 +1752,9 @@ protected:
     bool                 m_inheritBgCol:1;
     bool                 m_inheritFgCol:1;
     bool                 m_inheritFont:1;
+
+    // flag disabling accepting focus from keyboard
+    bool                 m_disableFocusFromKbd:1;
 
     // window attributes
     long                 m_windowStyle,
@@ -1928,7 +1951,6 @@ private:
     // number of Freeze() calls minus the number of Thaw() calls: we're frozen
     // (i.e. not being updated) if it is positive
     unsigned int m_freezeCount;
-
 
     wxDECLARE_ABSTRACT_CLASS(wxWindowBase);
     wxDECLARE_NO_COPY_CLASS(wxWindowBase);
